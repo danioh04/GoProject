@@ -149,6 +149,9 @@ func (e *Engine) applyStart(ev StartEvent) []Action {
 	}
 
 	e.locations = e.pick(e.cfg.Rounds)
+	if len(e.locations) < e.cfg.Rounds {
+		return reject(ev.PlayerID, "server has no locations available")
+	}
 	return append([]Action{MatchStartedAction{TotalRounds: e.cfg.Rounds}}, e.beginRound(1)...)
 }
 

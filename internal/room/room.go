@@ -4,16 +4,17 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
-	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"geoduel/internal/game"
 	"geoduel/internal/wsutil"
 )
 
 const (
-	idBytes       = 8
 	tokenBytes    = 16
 	commandBuffer = 128
 )
@@ -21,8 +22,11 @@ const (
 type Phase string
 
 const (
-	PhaseLobby  Phase = "lobby"
-	PhaseClosed Phase = "closed"
+	PhaseLobby    Phase = "lobby"
+	PhasePlaying  Phase = "playing"
+	PhaseReveal   Phase = "reveal"
+	PhaseFinished Phase = "finished"
+	PhaseClosed   Phase = "closed"
 )
 
 type Snapshot struct {
@@ -33,14 +37,14 @@ type Snapshot struct {
 	HostNickname string `json:"host_nickname"`
 }
 
-type RosterPlayer struct {
-	PlayerID string `json:"player_id"`
-	Nickname string `json:"nickname"`
-	IsHost   bool   `json:"is_host"`
-}
-
-type rosterPayload struct {
-	Players []RosterPlayer `json:"players"`
+type Options struct {
+	ID         string
+	JoinCode   string
+	Label      string
+	MaxPlayers int
+	Logger     *slog.Logger
+	Picker     func(n int) []game.Location
+	Config     game.Config
 }
 
 type AttachOutcome struct {
@@ -50,16 +54,9 @@ type AttachOutcome struct {
 	Token    string
 }
 
-type Player struct {
-	ID       string
-	Token    string
-	Nickname string
-	Host     bool
-	session  *wsutil.Session
-}
-
-func (p *Player) authorized(token string) bool {
-	return subtle.ConstantTimeCompare([]byte(p.Token), []byte(token)) == 1
+type connMeta struct {
+	session *wsutil.Session
+	token   string
 }
 
 type command interface{}
@@ -71,47 +68,60 @@ type attachCommand struct {
 }
 
 type inboundCommand struct {
-	playerID string
+	playerID game.PlayerID
 	env      wsutil.Envelope
 }
 
 type disconnectCommand struct {
-	playerID string
+	playerID game.PlayerID
+}
+
+type timeoutCommand struct {
+	tag game.TimerTag
 }
 
 type Room struct {
-	id         string
-	joinCode   string
-	label      string
-	maxPlayers int
-	logger     *slog.Logger
+	id       string
+	joinCode string
+	label    string
+	cfg      game.Config
+	logger   *slog.Logger
 
-	commands  chan command
-	done      chan struct{}
-	snapshot  atomic.Pointer[Snapshot]
+	engine   *game.Engine
+	sessions map[game.PlayerID]connMeta
+	timers   map[game.TimerKind]*time.Timer
+
+	commands chan command
+	done     chan struct{}
+	snapshot atomic.Pointer[Snapshot]
+
 	closeOnce sync.Once
 	closeMu   sync.RWMutex
 	closed    bool
-
-	players map[string]*Player
-	order   []string
 }
 
-func Start(id, joinCode, label string, maxPlayers int, logger *slog.Logger) *Room {
-	if maxPlayers <= 0 {
-		maxPlayers = 8
+func Start(opts Options) *Room {
+	if opts.MaxPlayers <= 0 {
+		opts.MaxPlayers = 8
 	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+	opts.Config.MaxPlayers = opts.MaxPlayers
+
 	r := &Room{
-		id:         id,
-		joinCode:   joinCode,
-		label:      label,
-		maxPlayers: maxPlayers,
-		logger:     logger,
-		commands:   make(chan command, commandBuffer),
-		done:       make(chan struct{}),
-		players:    make(map[string]*Player),
+		id:       opts.ID,
+		joinCode: opts.JoinCode,
+		label:    opts.Label,
+		cfg:      opts.Config,
+		logger:   opts.Logger,
+		engine:   game.New(opts.Config, time.Now, opts.Picker),
+		sessions: make(map[game.PlayerID]connMeta),
+		timers:   make(map[game.TimerKind]*time.Timer),
+		commands: make(chan command, commandBuffer),
+		done:     make(chan struct{}),
 	}
-	r.publish(PhaseLobby, 0)
+	r.publish()
 	go r.run()
 	return r
 }
@@ -126,109 +136,196 @@ func (r *Room) run() {
 			r.handleInbound(c)
 		case disconnectCommand:
 			r.handleDisconnect(c)
+		case timeoutCommand:
+			r.execute(r.engine.Apply(game.TimeoutEvent{Tag: c.tag}))
 		}
 	}
 }
 
 func (r *Room) shutdown() {
-	r.publish(PhaseClosed, 0)
+	r.stopTimers()
 	kicked, _ := wsutil.NewEnvelope(wsutil.TypeKicked, map[string]string{"reason": "room closed"})
-	for _, p := range r.playerList() {
-		p.session.Send(kicked)
-		p.session.Kick()
+	for _, meta := range r.sessions {
+		meta.session.Send(kicked)
+		meta.session.Kick()
 	}
+	r.publishClosed()
 	close(r.done)
 }
 
 func (r *Room) handleAttach(cmd attachCommand) {
-	outcome := func() AttachOutcome {
-		if len(r.order) >= r.maxPlayers {
-			return AttachOutcome{Reason: "room full"}
-		}
-		for _, p := range r.players {
-			if strings.EqualFold(p.Nickname, cmd.nickname) {
-				return AttachOutcome{Reason: "nickname already taken"}
-			}
-		}
-		id, token, err := mintIdentity()
-		if err != nil {
-			r.logger.Error("mint identity", "error", err)
-			return AttachOutcome{Reason: "internal error"}
-		}
-		player := &Player{
-			ID:       id,
-			Token:    token,
-			Nickname: cmd.nickname,
-			Host:     len(r.order) == 0,
-			session:  cmd.session,
-		}
-		r.players[id] = player
-		r.order = append(r.order, id)
-		return AttachOutcome{Accepted: true, PlayerID: id, Token: token}
-	}()
-
-	if !outcome.Accepted {
-		cmd.reply <- outcome
+	playerID, token, err := mintTokenPair()
+	if err != nil {
+		r.logger.Error("mint identity", "error", err)
+		cmd.reply <- AttachOutcome{Reason: "internal error"}
 		return
 	}
 
-	joined, _ := wsutil.NewEnvelope(wsutil.TypeJoined, map[string]any{
-		"player_id": outcome.PlayerID,
-		"token":     outcome.Token,
-		"host":      r.players[outcome.PlayerID].Host,
-	})
-	r.players[outcome.PlayerID].session.Send(joined)
-	r.broadcastRoster()
-	r.publish(PhaseLobby, len(r.order))
-	r.logger.Info("player attached", "room_id", r.id, "player_id", outcome.PlayerID)
-	cmd.reply <- outcome
+	acts := r.engine.Apply(game.JoinEvent{PlayerID: playerID, Nickname: cmd.nickname})
+	if reason, rejected := findRejected(acts, playerID); rejected {
+		cmd.reply <- AttachOutcome{Reason: reason}
+		return
+	}
+
+	r.sessions[playerID] = connMeta{session: cmd.session, token: token}
+	cmd.reply <- AttachOutcome{Accepted: true, PlayerID: string(playerID), Token: token}
+	r.execute(acts)
 }
 
 func (r *Room) handleInbound(cmd inboundCommand) {
-	p, ok := r.players[cmd.playerID]
+	meta, ok := r.sessions[cmd.playerID]
 	if !ok {
 		return
 	}
+
 	switch cmd.env.Type {
 	case wsutil.TypePing:
-		if !p.authorized(cmd.env.Token) {
-			r.directError(p, "invalid or missing token")
+		if !tokenMatches(meta.token, cmd.env.Token) {
+			sendError(meta.session, "invalid or missing token")
 			return
 		}
 		pong, _ := wsutil.NewEnvelope(wsutil.TypePong, nil)
-		if !p.session.Send(pong) {
-			p.session.Kick()
+		if !meta.session.Send(pong) {
+			meta.session.Kick()
 		}
+
+	case wsutil.TypeGuess:
+		if !tokenMatches(meta.token, cmd.env.Token) {
+			sendError(meta.session, "invalid or missing token")
+			return
+		}
+		var p struct {
+			Lat float64 `json:"lat"`
+			Lng float64 `json:"lng"`
+		}
+		if json.Unmarshal(cmd.env.Payload, &p) != nil {
+			sendError(meta.session, "invalid guess payload")
+			return
+		}
+		r.execute(r.engine.Apply(game.GuessEvent{
+			PlayerID: cmd.playerID,
+			Guess:    game.LatLng{Lat: p.Lat, Lng: p.Lng},
+		}))
+
+	case wsutil.TypeStartGame:
+		if !tokenMatches(meta.token, cmd.env.Token) {
+			sendError(meta.session, "invalid or missing token")
+			return
+		}
+		r.execute(r.engine.Apply(game.StartEvent{PlayerID: cmd.playerID}))
+
 	default:
-		r.directError(p, "unsupported message type")
+		sendError(meta.session, "unsupported message type")
 	}
 }
 
 func (r *Room) handleDisconnect(cmd disconnectCommand) {
-	p, ok := r.players[cmd.playerID]
-	if !ok {
+	if _, ok := r.sessions[cmd.playerID]; !ok {
 		return
 	}
-	delete(r.players, cmd.playerID)
-	for i, id := range r.order {
-		if id == cmd.playerID {
-			r.order = append(r.order[:i], r.order[i+1:]...)
-			break
+	delete(r.sessions, cmd.playerID)
+	r.execute(r.engine.Apply(game.LeaveEvent{PlayerID: cmd.playerID}))
+}
+
+func (r *Room) execute(acts []game.Action) {
+	for _, a := range acts {
+		switch act := a.(type) {
+		case game.PlayerJoinedAction:
+			meta := r.sessions[act.PlayerID]
+			env := joinedEnvelope(act.PlayerID, meta.token, act.Host)
+			if !meta.session.Send(env) {
+				meta.session.Kick()
+			}
+
+		case game.RejectedAction:
+			if meta, ok := r.sessions[act.PlayerID]; ok {
+				sendError(meta.session, act.Reason)
+			}
+
+		case game.RosterChangedAction:
+			r.broadcastRoster()
+
+		case game.MatchStartedAction:
+			env, _ := wsutil.NewEnvelope(wsutil.TypeGameStart, map[string]int{"total_rounds": act.TotalRounds})
+			r.broadcast(env)
+
+		case game.RoundStartedAction:
+			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundStart, roundStartPayload{
+				Round:        act.Round,
+				TotalRounds:  act.TotalRounds,
+				Location:     act.Location,
+				DeadlineUnix: act.Deadline.Unix(),
+				Seconds:      act.RoundSeconds,
+			})
+			r.broadcast(env)
+
+		case game.GuessAcceptedAction:
+			if meta, ok := r.sessions[act.PlayerID]; ok {
+				env, _ := wsutil.NewEnvelope(wsutil.TypeGuessAck, map[string]int{"round": act.Round})
+				if !meta.session.Send(env) {
+					meta.session.Kick()
+				}
+			}
+
+		case game.RoundRevealedAction:
+			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundResult, roundResultPayload{
+				Round:   act.Round,
+				Target:  act.Target,
+				Results: act.Results,
+			})
+			r.broadcast(env)
+
+		case game.MatchEndedAction:
+			env, _ := wsutil.NewEnvelope(wsutil.TypeGameOver, gameOverPayload{Standings: act.Standings})
+			r.broadcast(env)
+
+		case game.TimerScheduledAction:
+			r.armTimer(act.Tag, act.Delay)
+
+		case game.RoomEmptyAction:
+			r.Close()
 		}
 	}
+	r.publish()
+}
 
-	if p.Host && len(r.order) > 0 {
-		r.players[r.order[0]].Host = true
-		r.logger.Info("host promoted", "room_id", r.id, "player_id", r.order[0])
+func (r *Room) armTimer(tag game.TimerTag, delay time.Duration) {
+	if old := r.timers[tag.Kind]; old != nil {
+		old.Stop()
 	}
-	r.publish(PhaseLobby, len(r.order))
-	r.logger.Info("player disconnected", "room_id", r.id, "player_id", cmd.playerID)
+	r.timers[tag.Kind] = time.AfterFunc(delay, func() {
+		r.deliver(timeoutCommand{tag: tag})
+	})
+}
 
-	if len(r.order) == 0 {
-		r.Close()
-		return
+func (r *Room) stopTimers() {
+	for kind, t := range r.timers {
+		t.Stop()
+		delete(r.timers, kind)
 	}
-	r.broadcastRoster()
+}
+
+func (r *Room) publishClosed() {
+	r.snapshot.Store(&Snapshot{
+		ID:           r.id,
+		JoinCode:     r.joinCode,
+		State:        PhaseClosed,
+		PlayerCount:  0,
+		HostNickname: r.label,
+	})
+}
+
+func (r *Room) broadcastRoster() {
+	env, _ := wsutil.NewEnvelope(wsutil.TypeRoster, rosterPayload{Players: r.engine.Roster()})
+	r.broadcast(env)
+}
+
+func (r *Room) broadcast(env wsutil.Envelope) {
+	for _, meta := range r.sessions {
+		if !meta.session.Send(env) {
+			meta.session.Kick()
+		}
+	}
 }
 
 func (r *Room) Attach(session *wsutil.Session, nickname string) AttachOutcome {
@@ -245,11 +342,11 @@ func (r *Room) Attach(session *wsutil.Session, nickname string) AttachOutcome {
 }
 
 func (r *Room) NotifyInbound(playerID string, env wsutil.Envelope) {
-	r.deliver(inboundCommand{playerID: playerID, env: env})
+	r.deliver(inboundCommand{playerID: game.PlayerID(playerID), env: env})
 }
 
 func (r *Room) NotifyDisconnect(playerID string) {
-	r.deliver(disconnectCommand{playerID: playerID})
+	r.deliver(disconnectCommand{playerID: game.PlayerID(playerID)})
 }
 
 func (r *Room) Close() {
@@ -285,54 +382,90 @@ func (r *Room) deliver(cmd command) bool {
 	}
 }
 
-func (r *Room) broadcastRoster() {
-	payload := rosterPayload{Players: make([]RosterPlayer, 0, len(r.order))}
-	for _, id := range r.order {
-		p := r.players[id]
-		payload.Players = append(payload.Players, RosterPlayer{
-			PlayerID: p.ID,
-			Nickname: p.Nickname,
-			IsHost:   p.Host,
-		})
+func (r *Room) publish() {
+	state := PhaseClosed
+	switch r.engine.Phase() {
+	case game.PhaseLobby:
+		state = PhaseLobby
+	case game.PhasePlaying:
+		state = PhasePlaying
+	case game.PhaseReveal:
+		state = PhaseReveal
+	case game.PhaseFinished:
+		state = PhaseFinished
 	}
-	env, _ := wsutil.NewEnvelope(wsutil.TypeRoster, payload)
-	for _, p := range r.playerList() {
-		if !p.session.Send(env) {
-			p.session.Kick()
-		}
-	}
-}
-
-func (r *Room) directError(p *Player, msg string) {
-	env, _ := wsutil.NewEnvelope(wsutil.TypeError, map[string]string{"error": msg})
-	if !p.session.Send(env) {
-		p.session.Kick()
-	}
-}
-
-func (r *Room) playerList() []*Player {
-	list := make([]*Player, 0, len(r.order))
-	for _, id := range r.order {
-		list = append(list, r.players[id])
-	}
-	return list
-}
-
-func (r *Room) publish(state Phase, playerCount int) {
 	r.snapshot.Store(&Snapshot{
 		ID:           r.id,
 		JoinCode:     r.joinCode,
 		State:        state,
-		PlayerCount:  playerCount,
+		PlayerCount:  r.engine.PlayerCount(),
 		HostNickname: r.label,
 	})
 }
 
-func mintIdentity() (id, token string, err error) {
-	var b [idBytes + tokenBytes]byte
+type joinedPayload struct {
+	PlayerID string `json:"player_id"`
+	Token    string `json:"token"`
+	Host     bool   `json:"host"`
+}
+
+type rosterPayload struct {
+	Players []game.PlayerView `json:"players"`
+}
+
+type roundStartPayload struct {
+	Round        int              `json:"round"`
+	TotalRounds  int              `json:"total_rounds"`
+	Location     game.LocationRef `json:"location"`
+	DeadlineUnix int64            `json:"deadline_unix"`
+	Seconds      int              `json:"seconds"`
+}
+
+type roundResultPayload struct {
+	Round   int                `json:"round"`
+	Target  game.LatLng        `json:"target"`
+	Results []game.RoundResult `json:"results"`
+}
+
+type gameOverPayload struct {
+	Standings []game.Standing `json:"standings"`
+}
+
+func joinedEnvelope(id game.PlayerID, token string, host bool) wsutil.Envelope {
+	env, _ := wsutil.NewEnvelope(wsutil.TypeJoined, joinedPayload{
+		PlayerID: string(id),
+		Token:    token,
+		Host:     host,
+	})
+	return env
+}
+
+func sendError(session *wsutil.Session, msg string) {
+	env, _ := wsutil.NewEnvelope(wsutil.TypeError, map[string]string{"error": msg})
+	if !session.Send(env) {
+		session.Kick()
+	}
+}
+
+func tokenMatches(stored, provided string) bool {
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(provided)) == 1
+}
+
+func findRejected(acts []game.Action, playerID game.PlayerID) (string, bool) {
+	for _, a := range acts {
+		if rej, ok := a.(game.RejectedAction); ok && rej.PlayerID == playerID {
+			return rej.Reason, true
+		}
+	}
+	return "", false
+}
+
+func mintTokenPair() (id game.PlayerID, token string, err error) {
+	var b [8 + tokenBytes]byte
 	if _, err = rand.Read(b[:]); err != nil {
 		return "", "", err
 	}
-	marshalled := hex.EncodeToString(b[:])
-	return marshalled[:idBytes*2], marshalled[idBytes*2:], nil
+	hexed := hex.EncodeToString(b[:])
+	split := 8 * 2
+	return game.PlayerID(hexed[:split]), hexed[split:], nil
 }

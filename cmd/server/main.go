@@ -14,7 +14,10 @@ import (
 
 	"geoduel/internal/api"
 	"geoduel/internal/config"
+	"geoduel/internal/game"
 	"geoduel/internal/hub"
+	"geoduel/internal/location"
+	"geoduel/internal/room"
 )
 
 func main() {
@@ -32,7 +35,22 @@ func run(ctx context.Context) error {
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
-	rooms := hub.New(logger, cfg.MaxPlayers)
+	pool, err := location.Load()
+	if err != nil {
+		return fmt.Errorf("load locations: %w", err)
+	}
+	logger.Info("location pool loaded", "count", pool.Len())
+
+	gameCfg := game.DefaultConfig()
+	gameCfg.Rounds = cfg.Rounds
+	gameCfg.RoundTime = time.Duration(cfg.RoundSeconds) * time.Second
+	gameCfg.RevealTime = time.Duration(cfg.RevealSeconds) * time.Second
+
+	rooms := hub.New(logger, room.Options{
+		MaxPlayers: cfg.MaxPlayers,
+		Picker:     pool.Picker(nil),
+		Config:     gameCfg,
+	})
 
 	srv := &http.Server{
 		Handler:           api.New(logger, rooms),

@@ -6,20 +6,26 @@ import (
 )
 
 type Config struct {
-	Addr        string
-	LogLevel    string
-	LogFormat   string
-	DatabaseURL string
-	MaxPlayers  int
+	Addr          string
+	LogLevel      string
+	LogFormat     string
+	DatabaseURL   string
+	MaxPlayers    int
+	Rounds        int
+	RoundSeconds  int
+	RevealSeconds int
 }
 
 func Load() Config {
 	return Config{
-		Addr:        envOr("ADDR", ":8080"),
-		LogLevel:    envOr("LOG_LEVEL", "info"),
-		LogFormat:   envOr("LOG_FORMAT", "text"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		MaxPlayers:  envIntOr("MAX_ROOM_SIZE", 8),
+		Addr:          envOr("ADDR", ":8080"),
+		LogLevel:      envOr("LOG_LEVEL", "info"),
+		LogFormat:     envOr("LOG_FORMAT", "text"),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		MaxPlayers:    envIntOr("MAX_ROOM_SIZE", 8),
+		Rounds:        envIntOr("ROUNDS", 5),
+		RoundSeconds:  envIntOr("ROUND_SECONDS", 60),
+		RevealSeconds: envIntOr("REVEAL_SECONDS", 10),
 	}
 }
 

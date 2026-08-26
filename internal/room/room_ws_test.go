@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"geoduel/internal/game"
 	"geoduel/internal/room"
 	"geoduel/internal/wsutil"
 )
@@ -90,7 +91,7 @@ func startRoomServer(t *testing.T, r *room.Room) func(name string) *testClient {
 }
 
 func TestAttachRosterAndIdentity(t *testing.T) {
-	r := room.Start("rm1", "ROOMRM", "label", 8, testLogger())
+	r := room.Start(room.Options{ID: "rm1", JoinCode: "ROOMRM", Logger: testLogger(), Picker: testPicker})
 	dial := startRoomServer(t, r)
 	defer r.Close()
 
@@ -123,7 +124,7 @@ func TestAttachRosterAndIdentity(t *testing.T) {
 		t.Fatalf("bob second message = %q, want roster", rosterB.Type)
 	}
 	var players struct {
-		Players []room.RosterPlayer `json:"players"`
+		Players []game.PlayerView `json:"players"`
 	}
 	if err := json.Unmarshal(rosterB.Payload, &players); err != nil {
 		t.Fatalf("decode roster: %v", err)
@@ -139,7 +140,7 @@ func TestAttachRosterAndIdentity(t *testing.T) {
 	if err := json.Unmarshal(rosterA2.Payload, &players); err != nil {
 		t.Fatalf("decode roster A: %v", err)
 	}
-	if len(players.Players) != 2 || players.Players[0].PlayerID != identity.PlayerID {
+	if len(players.Players) != 2 || string(players.Players[0].PlayerID) != identity.PlayerID {
 		t.Errorf("alice's roster view wrong: %+v", players.Players)
 	}
 
@@ -151,7 +152,7 @@ func TestAttachRosterAndIdentity(t *testing.T) {
 }
 
 func TestDuplicateNicknameRejected(t *testing.T) {
-	r := room.Start("rm2", "ROOMRR", "label", 8, testLogger())
+	r := room.Start(room.Options{ID: "rm2", JoinCode: "ROOMRR", Logger: testLogger(), Picker: testPicker})
 	dial := startRoomServer(t, r)
 	defer r.Close()
 
@@ -183,7 +184,7 @@ func TestDuplicateNicknameRejected(t *testing.T) {
 }
 
 func TestRoomFullRejected(t *testing.T) {
-	r := room.Start("rm3", "ROOMRF", "label", 1, testLogger())
+	r := room.Start(room.Options{ID: "rm3", JoinCode: "ROOMRF", MaxPlayers: 1, Logger: testLogger(), Picker: testPicker})
 	dial := startRoomServer(t, r)
 	defer r.Close()
 
@@ -200,7 +201,7 @@ func TestRoomFullRejected(t *testing.T) {
 }
 
 func TestHostPromotionOnHostLeave(t *testing.T) {
-	r := room.Start("rm4", "ROOMRP", "label", 8, testLogger())
+	r := room.Start(room.Options{ID: "rm4", JoinCode: "ROOMRP", Logger: testLogger(), Picker: testPicker})
 	dial := startRoomServer(t, r)
 	defer r.Close()
 
@@ -224,7 +225,7 @@ func TestHostPromotionOnHostLeave(t *testing.T) {
 		t.Fatalf("post-leave message = %q, want roster", roster.Type)
 	}
 	var players struct {
-		Players []room.RosterPlayer `json:"players"`
+		Players []game.PlayerView `json:"players"`
 	}
 	if err := json.Unmarshal(roster.Payload, &players); err != nil {
 		t.Fatalf("decode roster: %v", err)
@@ -235,7 +236,7 @@ func TestHostPromotionOnHostLeave(t *testing.T) {
 	if players.Players[0].Nickname != "bob" || !players.Players[0].IsHost {
 		t.Errorf("promotion failed: %+v", players.Players[0])
 	}
-	if players.Players[0].PlayerID == ida.PlayerID {
+	if string(players.Players[0].PlayerID) == ida.PlayerID {
 		t.Error("stale host id in roster")
 	}
 
@@ -248,7 +249,7 @@ func TestHostPromotionOnHostLeave(t *testing.T) {
 }
 
 func TestPingPongWithTokenAuth(t *testing.T) {
-	r := room.Start("rm5", "ROOMRT", "label", 8, testLogger())
+	r := room.Start(room.Options{ID: "rm5", JoinCode: "ROOMRT", Logger: testLogger(), Picker: testPicker})
 	dial := startRoomServer(t, r)
 	defer r.Close()
 
@@ -289,7 +290,7 @@ func TestPingPongWithTokenAuth(t *testing.T) {
 }
 
 func TestMalformedJSONDoesNotKillSession(t *testing.T) {
-	r := room.Start("rm6", "ROOMRJ", "label", 8, testLogger())
+	r := room.Start(room.Options{ID: "rm6", JoinCode: "ROOMRJ", Logger: testLogger(), Picker: testPicker})
 	dial := startRoomServer(t, r)
 	defer r.Close()
 

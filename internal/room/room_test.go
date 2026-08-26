@@ -15,7 +15,7 @@ func testLogger() *slog.Logger {
 }
 
 func TestLifecycle(t *testing.T) {
-	r := room.Start("room-1", "ABC234", "dan", 8, testLogger())
+	r := room.Start(room.Options{ID: "room-1", JoinCode: "ABC234", Label: "dan", Logger: testLogger()})
 
 	snap := r.Snapshot()
 	if snap.ID != "room-1" || snap.JoinCode != "ABC234" || snap.HostNickname != "dan" {
@@ -40,7 +40,7 @@ func TestLifecycle(t *testing.T) {
 }
 
 func TestSnapshotIsCopySafe(t *testing.T) {
-	r := room.Start("id", "XYZ789", "host", 8, testLogger())
+	r := room.Start(room.Options{ID: "id", JoinCode: "XYZ789", Label: "host", Logger: testLogger()})
 	defer r.Close()
 
 	snap := r.Snapshot()
@@ -51,7 +51,7 @@ func TestSnapshotIsCopySafe(t *testing.T) {
 }
 
 func TestNotifyAfterCloseIsSafe(t *testing.T) {
-	r := room.Start("id", "XYZ789", "host", 8, testLogger())
+	r := room.Start(room.Options{ID: "id", JoinCode: "XYZ789", Label: "host", Logger: testLogger()})
 	r.Close()
 	<-r.Done()
 

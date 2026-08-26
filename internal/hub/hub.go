@@ -19,21 +19,21 @@ const (
 )
 
 type Hub struct {
-	logger     *slog.Logger
-	maxPlayers int
+	logger   *slog.Logger
+	defaults room.Options
 
 	mu    sync.RWMutex
 	rooms map[string]*room.Room
 }
 
-func New(logger *slog.Logger, maxPlayers int) *Hub {
-	if maxPlayers <= 0 {
-		maxPlayers = 8
+func New(logger *slog.Logger, defaults room.Options) *Hub {
+	if defaults.MaxPlayers <= 0 {
+		defaults.MaxPlayers = 8
 	}
 	return &Hub{
-		logger:     logger,
-		maxPlayers: maxPlayers,
-		rooms:      make(map[string]*room.Room),
+		logger:   logger,
+		defaults: defaults,
+		rooms:    make(map[string]*room.Room),
 	}
 }
 
@@ -55,7 +55,12 @@ func (h *Hub) Create(hostNickname string) *room.Room {
 		}
 	}
 
-	r := room.Start(generateID(), code, hostNickname, h.maxPlayers, h.logger)
+	opts := h.defaults
+	opts.ID = generateID()
+	opts.JoinCode = code
+	opts.Label = hostNickname
+	opts.Logger = h.logger
+	r := room.Start(opts)
 	h.rooms[code] = r
 	h.logger.Info("room created", "room_id", r.Snapshot().ID, "join_code", code)
 

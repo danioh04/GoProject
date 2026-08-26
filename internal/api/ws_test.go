@@ -14,11 +14,12 @@ import (
 
 	"geoduel/internal/api"
 	"geoduel/internal/hub"
+	"geoduel/internal/room"
 	"geoduel/internal/wsutil"
 )
 
 func TestWSRejectsBeforeUpgrade(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), 8)))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{})))
 	defer srv.Close()
 
 	cases := []struct {
@@ -50,7 +51,7 @@ func TestWSRejectsBeforeUpgrade(t *testing.T) {
 }
 
 func TestWSEndToEndThroughAPI(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), 8)))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{})))
 	defer srv.Close()
 
 	resp, err := srv.Client().Post(srv.URL+"/v1/rooms", "application/json", strings.NewReader(`{"nickname":"host"}`))
