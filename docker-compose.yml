@@ -1,0 +1,35 @@
+name: geoduel
+
+services:
+  server:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ADDR: ":8080"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      DATABASE_URL: postgres://geoduel:geoduel@db:5432/geoduel?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: geoduel
+      POSTGRES_PASSWORD: geoduel
+      POSTGRES_DB: geoduel
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geoduel"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  pgdata:
