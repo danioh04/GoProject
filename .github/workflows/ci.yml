@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: geoduel
+          POSTGRES_PASSWORD: geoduel
+          POSTGRES_DB: geoduel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geoduel"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      GEODUEL_TEST_DATABASE: postgres://geoduel:geoduel@localhost:5432/geoduel?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: vet
+        run: go vet ./...
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+      - name: test (race detector)
+        run: go test ./... -race -count=1 -timeout 300s
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -t geoduel:ci .

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"geoduel/internal/metrics"
 	"geoduel/internal/room"
 )
 
@@ -62,6 +63,7 @@ func (h *Hub) Create(hostNickname string) *room.Room {
 	opts.Logger = h.logger
 	r := room.Start(opts)
 	h.rooms[code] = r
+	metrics.RoomsActive.Add(1)
 	h.logger.Info("room created", "room_id", r.Snapshot().ID, "join_code", code)
 
 	go func() {
@@ -69,6 +71,7 @@ func (h *Hub) Create(hostNickname string) *room.Room {
 		h.mu.Lock()
 		delete(h.rooms, code)
 		h.mu.Unlock()
+		metrics.RoomsActive.Add(-1)
 		h.logger.Info("room removed", "join_code", code)
 	}()
 	return r

@@ -3,6 +3,8 @@ package api
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"geoduel/internal/hub"
+	"geoduel/internal/metrics"
 	"geoduel/internal/store"
 	"geoduel/internal/wsutil"
 	"geoduel/web"
@@ -39,7 +42,7 @@ func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence) http.Hand
 	mux.HandleFunc("GET /v1/games/{id}", s.handleGameDetail)
 	mux.Handle("GET /", http.FileServerFS(web.Static()))
 
-	return logRequests(logger)(recoverPanics(logger)(mux))
+	return logRequests(logger)(requestIDs(recoverPanics(logger)(mux)))
 }
 
 type server struct {
@@ -150,9 +153,11 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playerID := outcome.PlayerID
+	metrics.WSConns.Add(1)
 	session.Run(func(env wsutil.Envelope) {
 		room.NotifyInbound(playerID, env)
 	}, func() {
+		metrics.WSConns.Add(-1)
 		room.NotifyDisconnect(playerID)
 	})
 }
@@ -227,6 +232,29 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return h.Hijack()
 }
 
+type requestIDKey struct{}
+
+func requestIDs(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b [8]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		id := hex.EncodeToString(b[:])
+		w.Header().Set("X-Request-ID", id)
+		ctx := context.WithValue(r.Context(), requestIDKey{}, id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func requestIDFrom(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		return id
+	}
+	return ""
+}
+
 func logRequests(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +266,7 @@ func logRequests(logger *slog.Logger) func(http.Handler) http.Handler {
 				"path", r.URL.Path,
 				"status", sw.status,
 				"duration_ms", time.Since(start).Milliseconds(),
+				"request_id", requestIDFrom(r.Context()),
 			)
 		})
 	}

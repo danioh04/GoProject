@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"geoduel/internal/game"
+	"geoduel/internal/metrics"
 	"geoduel/internal/wsutil"
 )
 
@@ -290,6 +291,7 @@ func (r *Room) execute(acts []game.Action) {
 			r.broadcast(env)
 
 		case game.GuessAcceptedAction:
+			metrics.GuessesTotal.Add(1)
 			if meta, ok := r.sessions[act.PlayerID]; ok {
 				env, _ := wsutil.NewEnvelope(wsutil.TypeGuessAck, map[string]int{"round": act.Round})
 				if !meta.session.Send(env) {

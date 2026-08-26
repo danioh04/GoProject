@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	_ "expvar"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -80,6 +82,15 @@ func run(ctx context.Context) error {
 	srv := &http.Server{
 		Handler:           api.New(logger, rooms, persistence),
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	if cfg.DebugAddr != "" {
+		go func() {
+			logger.Info("debug server listening", "addr", cfg.DebugAddr)
+			if err := http.ListenAndServe(cfg.DebugAddr, nil); err != nil {
+				logger.Error("debug server failed", "error", err)
+			}
+		}()
 	}
 
 	listener, err := net.Listen("tcp", cfg.Addr)
