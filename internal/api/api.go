@@ -14,6 +14,7 @@ import (
 
 	"geoduel/internal/hub"
 	"geoduel/internal/wsutil"
+	"geoduel/web"
 )
 
 const maxNicknameLen = 24
@@ -26,6 +27,7 @@ func New(logger *slog.Logger, rooms *hub.Hub) http.Handler {
 	mux.HandleFunc("POST /v1/rooms", s.handleCreateRoom)
 	mux.HandleFunc("GET /v1/rooms/{code}", s.handleGetRoom)
 	mux.HandleFunc("GET /v1/ws", s.handleWS)
+	mux.Handle("GET /", http.FileServerFS(web.Static()))
 
 	return logRequests(logger)(recoverPanics(logger)(mux))
 }
@@ -62,19 +64,21 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
-	rawName := r.URL.Query().Get("name")
 
-	nickname, ok := normalizeNickname(rawName)
+	nickname, ok := normalizeNickname(r.URL.Query().Get("name"))
 	if !ok {
+		s.logger.Info("ws handshake rejected", "reason", "invalid name", "remote", r.RemoteAddr)
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("name must be 1-%d characters", maxNicknameLen))
 		return
 	}
 	if !hub.ValidJoinCode(code) {
+		s.logger.Info("ws handshake rejected", "reason", "invalid code", "code", code)
 		writeErr(w, http.StatusBadRequest, "invalid join code")
 		return
 	}
 	room, exists := s.rooms.Get(code)
 	if !exists {
+		s.logger.Info("ws handshake rejected", "reason", "room not found", "code", code)
 		writeErr(w, http.StatusNotFound, "room not found")
 		return
 	}

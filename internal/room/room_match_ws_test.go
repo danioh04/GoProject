@@ -13,8 +13,8 @@ import (
 
 func matchLocations() []game.Location {
 	return []game.Location{
-		{ID: "paris", Lat: 48.8566, Lng: 2.3522},
-		{ID: "tokyo", Lat: 35.6762, Lng: 139.6503},
+		{ID: "paris", Lat: 48.8566, Lng: 2.3522, Hint: "An iron tower defines this river city's skyline."},
+		{ID: "tokyo", Lat: 35.6762, Lng: 139.6503, Hint: "The world's largest metro area, famed for its scramble crossing."},
 	}
 }
 
@@ -54,7 +54,7 @@ func TestFullMatchOverWebSockets(t *testing.T) {
 	a.send(t, wsutil.Envelope{Version: 1, Type: wsutil.TypeStartGame, Token: tokenA})
 	assertType(t, a, wsutil.TypeGameStart)
 	rs1 := assertType(t, a, wsutil.TypeRoundStart)
-	assertRoundStartHidesTarget(t, rs1, "paris")
+	assertRoundStartSafe(t, rs1)
 	assertType(t, b, wsutil.TypeGameStart)
 	assertType(t, b, wsutil.TypeRoundStart)
 
@@ -67,10 +67,7 @@ func TestFullMatchOverWebSockets(t *testing.T) {
 	verifyFirstReveal(t, assertType(t, a, wsutil.TypeRoundResult))
 	assertType(t, b, wsutil.TypeRoundResult)
 
-	rs2 := waitForRoundStart(t, a, 2)
-	if got := extractLocationID(t, rs2); got != "tokyo" {
-		t.Errorf("round 2 location = %q, want tokyo", got)
-	}
+	waitForRoundStart(t, a, 2)
 	assertType(t, b, wsutil.TypeRoundStart)
 
 	doneB := make(chan struct{})
@@ -133,24 +130,26 @@ func assertType(t *testing.T, c *testClient, want string) wsutil.Envelope {
 	return env
 }
 
-func assertRoundStartHidesTarget(t *testing.T, env wsutil.Envelope, wantLocID string) {
+func assertRoundStartSafe(t *testing.T, env wsutil.Envelope) {
 	t.Helper()
 	raw := string(env.Payload)
-	if !strings.Contains(raw, `"id":"`+wantLocID+`"`) {
-		t.Errorf("round_start missing location id %q: %s", wantLocID, raw)
-	}
-	if strings.Contains(raw, `"lat"`) || strings.Contains(raw, `"lng"`) || strings.Contains(raw, "target") {
-		t.Errorf("ROUND START LEAKS TARGET COORDINATES: %s", raw)
-	}
-}
 
-func extractLocationID(t *testing.T, env wsutil.Envelope) string {
-	t.Helper()
 	var p struct {
-		Location game.LocationRef `json:"location"`
+		Round   int    `json:"round"`
+		Hint    string `json:"hint"`
+		PanoID  string `json:"pano_id"`
+		Seconds int    `json:"seconds"`
 	}
 	json.Unmarshal(env.Payload, &p)
-	return p.Location.ID
+	if p.Round != 1 || p.Hint == "" || p.Seconds != 1 {
+		t.Errorf("round_start payload missing clue fields: %s", raw)
+	}
+
+	for _, leak := range []string{"paris", `"lat"`, `"lng"`, `"target"`, "48.85"} {
+		if strings.Contains(raw, leak) {
+			t.Errorf("ROUND START LEAKS ANSWER (%q present): %s", leak, raw)
+		}
+	}
 }
 
 func verifyFirstReveal(t *testing.T, env wsutil.Envelope) {

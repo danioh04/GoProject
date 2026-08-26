@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -168,8 +169,9 @@ func (e *Engine) beginRound(round int) []Action {
 			Round:        round,
 			TotalRounds:  e.cfg.Rounds,
 			Location:     LocationRef{ID: loc.ID, PanoID: loc.PanoID},
+			Hint:         loc.Hint,
 			Deadline:     deadline,
-			RoundSeconds: int(e.cfg.RoundTime / time.Second),
+			RoundSeconds: int(math.Ceil(e.cfg.RoundTime.Seconds())),
 		},
 		TimerScheduledAction{Tag: TimerTag{Kind: TimerDeadline, Round: round}, Delay: e.cfg.RoundTime},
 	}

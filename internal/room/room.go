@@ -253,7 +253,8 @@ func (r *Room) execute(acts []game.Action) {
 			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundStart, roundStartPayload{
 				Round:        act.Round,
 				TotalRounds:  act.TotalRounds,
-				Location:     act.Location,
+				PanoID:       act.Location.PanoID,
+				Hint:         act.Hint,
 				DeadlineUnix: act.Deadline.Unix(),
 				Seconds:      act.RoundSeconds,
 			})
@@ -414,11 +415,12 @@ type rosterPayload struct {
 }
 
 type roundStartPayload struct {
-	Round        int              `json:"round"`
-	TotalRounds  int              `json:"total_rounds"`
-	Location     game.LocationRef `json:"location"`
-	DeadlineUnix int64            `json:"deadline_unix"`
-	Seconds      int              `json:"seconds"`
+	Round        int    `json:"round"`
+	TotalRounds  int    `json:"total_rounds"`
+	PanoID       string `json:"pano_id,omitempty"`
+	Hint         string `json:"hint,omitempty"`
+	DeadlineUnix int64  `json:"deadline_unix"`
+	Seconds      int    `json:"seconds"`
 }
 
 type roundResultPayload struct {
