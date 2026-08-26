@@ -15,7 +15,6 @@ import (
 const (
 	codeLen      = 6
 	idBytes      = 12
-	maxAttempts  = 10
 	codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 )
 
@@ -43,15 +42,9 @@ func (h *Hub) Create(hostNickname string) *room.Room {
 	defer h.mu.Unlock()
 
 	var code string
-	for attempt := 1; ; attempt++ {
-		if attempt > maxAttempts {
-			h.logger.Error("join code space exhausted")
-			code = strings.Repeat("X", codeLen)
-			break
-		}
-		candidate := generateCode()
-		if _, taken := h.rooms[candidate]; !taken {
-			code = candidate
+	for {
+		code = generateCode()
+		if _, taken := h.rooms[code]; !taken {
 			break
 		}
 	}

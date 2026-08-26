@@ -10,7 +10,7 @@ const state = {
 	deadlineAt: null,
 	timerHandle: null,
 	guess: null,
-	guessLockedText: null,
+	guessSubmitted: false,
 };
 
 let map = null;

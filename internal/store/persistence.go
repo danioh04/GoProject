@@ -105,9 +105,8 @@ func (s *Store) HardestLocations(ctx context.Context, limit int) ([]LocationStat
 		 JOIN rounds r ON r.game_id = g.game_id AND r.round = g.round
 		 WHERE g.lat IS NOT NULL
 		 GROUP BY r.location_id
-		 HAVING COUNT(*) >= $2
 		 ORDER BY avg_miss_km DESC
-		 LIMIT $1`, limit, 1)
+		 LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query hardest locations: %w", err)
 	}
@@ -183,7 +182,7 @@ func (s *Store) GameDetail(ctx context.Context, id string) (*GameDetail, error) 
 
 	guessRows, err := s.pool.Query(ctx,
 		`SELECT round, player_id, lat, lng, distance_m, score
-		 FROM guesses WHERE game_id = $1 ORDER BY round, score DESC`, id)
+		 FROM guesses WHERE game_id = $1 ORDER BY round, score DESC, player_id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("load guesses: %w", err)
 	}

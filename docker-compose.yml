@@ -3,13 +3,15 @@ name: geoduel
 services:
   server:
     build: .
-    ports:
-      - "8080:8080"
     environment:
       ADDR: ":8080"
       LOG_LEVEL: info
       LOG_FORMAT: json
+      DEBUG_ADDR: ":6060"
       DATABASE_URL: postgres://geoduel:geoduel@db:5432/geoduel?sslmode=disable
+    ports:
+      - "8080:8080"
+      - "6060:6060"
     depends_on:
       db:
         condition: service_healthy

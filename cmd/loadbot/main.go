@@ -67,6 +67,13 @@ func main() {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
+			defer func() {
+				if rec := recover(); rec != nil {
+					mu.Lock()
+					failures = append(failures, fmt.Sprintf("room %d: %v", n, rec))
+					mu.Unlock()
+				}
+			}()
 			if err := playMatch(*addr, n, *perRoom); err != nil {
 				mu.Lock()
 				failures = append(failures, fmt.Sprintf("room %d: %v", n, err))

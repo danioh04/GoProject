@@ -72,10 +72,6 @@ func (e *Engine) Roster() []PlayerView {
 	return out
 }
 
-func (e *Engine) Standings() []Standing {
-	return e.sortedStandings()
-}
-
 func reject(id PlayerID, format string, args ...any) []Action {
 	return []Action{RejectedAction{PlayerID: id, Reason: fmt.Sprintf(format, args...)}}
 }

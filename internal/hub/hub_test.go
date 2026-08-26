@@ -19,11 +19,9 @@ func TestCreateGeneratesUniqueCodesAndIDs(t *testing.T) {
 
 	codes := make(map[string]struct{}, n)
 	ids := make(map[string]struct{}, n)
-	rooms := make([]*room.Room, 0, n)
 
 	for i := 0; i < n; i++ {
 		r := h.Create("player")
-		rooms = append(rooms, r)
 
 		code := r.Snapshot().JoinCode
 		if len(code) != codeLen {

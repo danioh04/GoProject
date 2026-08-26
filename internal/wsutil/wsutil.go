@@ -20,9 +20,7 @@ const (
 	PongTimeout     = 90 * time.Second
 	WriteTimeout    = 5 * time.Second
 
-	TypeJoin        = "join"
 	TypeGuess       = "guess"
-	TypeLeave       = "leave"
 	TypeStartGame   = "start_game"
 	TypePing        = "ping"
 	TypeJoined      = "joined"
@@ -146,10 +144,6 @@ func (s *Session) Send(env Envelope) bool {
 	default:
 		return false
 	}
-}
-
-func (s *Session) Done() <-chan struct{} {
-	return s.done
 }
 
 func (s *Session) Kick() {

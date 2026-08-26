@@ -106,7 +106,6 @@ type Room struct {
 	id       string
 	joinCode string
 	label    string
-	cfg      game.Config
 	logger   *slog.Logger
 
 	engine   *game.Engine
@@ -119,9 +118,8 @@ type Room struct {
 	done     chan struct{}
 	snapshot atomic.Pointer[Snapshot]
 
-	closeOnce sync.Once
-	closeMu   sync.RWMutex
-	closed    bool
+	closeMu sync.RWMutex
+	closed  bool
 }
 
 func Start(opts Options) *Room {
@@ -137,7 +135,6 @@ func Start(opts Options) *Room {
 		id:       opts.ID,
 		joinCode: opts.JoinCode,
 		label:    opts.Label,
-		cfg:      opts.Config,
 		logger:   opts.Logger,
 		engine:   game.New(opts.Config, time.Now, opts.Picker),
 		sessions: make(map[game.PlayerID]connMeta),
@@ -256,10 +253,11 @@ func (r *Room) execute(acts []game.Action) {
 	for _, a := range acts {
 		switch act := a.(type) {
 		case game.PlayerJoinedAction:
-			meta := r.sessions[act.PlayerID]
-			env := joinedEnvelope(act.PlayerID, meta.token, act.Host)
-			if !meta.session.Send(env) {
-				meta.session.Kick()
+			if meta, ok := r.sessions[act.PlayerID]; ok {
+				env := joinedEnvelope(act.PlayerID, meta.token, act.Host)
+				if !meta.session.Send(env) {
+					meta.session.Kick()
+				}
 			}
 
 		case game.RejectedAction:

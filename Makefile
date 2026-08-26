@@ -30,5 +30,5 @@ compose-down:
 	docker compose down
 
 clean:
-	go clean
-	rm -rf bin
+	go clean ./...
+	-rm -rf bin
