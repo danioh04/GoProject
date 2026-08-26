@@ -32,7 +32,7 @@ func run(ctx context.Context) error {
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
-	rooms := hub.New(logger)
+	rooms := hub.New(logger, cfg.MaxPlayers)
 
 	srv := &http.Server{
 		Handler:           api.New(logger, rooms),

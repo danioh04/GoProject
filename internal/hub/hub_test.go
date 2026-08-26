@@ -14,7 +14,7 @@ func testLogger() *slog.Logger {
 }
 
 func TestCreateGeneratesUniqueCodesAndIDs(t *testing.T) {
-	h := New(testLogger())
+	h := New(testLogger(), 8)
 	const n = 1000
 
 	codes := make(map[string]struct{}, n)
@@ -50,7 +50,7 @@ func TestCreateGeneratesUniqueCodesAndIDs(t *testing.T) {
 }
 
 func TestGetIsCaseInsensitiveAndNormalizes(t *testing.T) {
-	h := New(testLogger())
+	h := New(testLogger(), 8)
 	defer h.Shutdown(2 * time.Second)
 
 	want := h.Create("host")
@@ -70,7 +70,7 @@ func TestGetIsCaseInsensitiveAndNormalizes(t *testing.T) {
 }
 
 func TestShutdownClosesAllRooms(t *testing.T) {
-	h := New(testLogger())
+	h := New(testLogger(), 8)
 
 	var rooms []*room.Room
 	for i := 0; i < 20; i++ {

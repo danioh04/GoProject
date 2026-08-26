@@ -1,15 +1,19 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"geoduel/internal/hub"
+	"geoduel/internal/wsutil"
 )
 
 const maxNicknameLen = 24
@@ -21,6 +25,7 @@ func New(logger *slog.Logger, rooms *hub.Hub) http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /v1/rooms", s.handleCreateRoom)
 	mux.HandleFunc("GET /v1/rooms/{code}", s.handleGetRoom)
+	mux.HandleFunc("GET /v1/ws", s.handleWS)
 
 	return logRequests(logger)(recoverPanics(logger)(mux))
 }
@@ -45,14 +50,55 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nickname := strings.TrimSpace(req.Nickname)
-	if nickname == "" || len([]rune(nickname)) > maxNicknameLen {
+	nickname, ok := normalizeNickname(req.Nickname)
+	if !ok {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("nickname must be 1-%d characters", maxNicknameLen))
 		return
 	}
 
 	room := s.rooms.Create(nickname)
 	writeJSON(w, http.StatusCreated, room.Snapshot())
+}
+
+func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	rawName := r.URL.Query().Get("name")
+
+	nickname, ok := normalizeNickname(rawName)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("name must be 1-%d characters", maxNicknameLen))
+		return
+	}
+	if !hub.ValidJoinCode(code) {
+		writeErr(w, http.StatusBadRequest, "invalid join code")
+		return
+	}
+	room, exists := s.rooms.Get(code)
+	if !exists {
+		writeErr(w, http.StatusNotFound, "room not found")
+		return
+	}
+
+	conn, err := wsutil.Accept(w, r)
+	if err != nil {
+		s.logger.Error("websocket accept failed", "error", err)
+		return
+	}
+
+	session := wsutil.NewSession(conn, wsutil.SessionConfig{})
+	outcome := room.Attach(session, nickname)
+	if !outcome.Accepted {
+		wsutil.WriteError(r.Context(), conn, outcome.Reason)
+		s.logger.Info("attach rejected", "join_code", room.Snapshot().JoinCode, "reason", outcome.Reason)
+		return
+	}
+
+	playerID := outcome.PlayerID
+	session.Run(func(env wsutil.Envelope) {
+		room.NotifyInbound(playerID, env)
+	}, func() {
+		room.NotifyDisconnect(playerID)
+	})
 }
 
 func (s *server) handleGetRoom(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +114,14 @@ func (s *server) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, room.Snapshot())
+}
+
+func normalizeNickname(raw string) (string, bool) {
+	n := strings.TrimSpace(raw)
+	if n == "" || len([]rune(n)) > maxNicknameLen {
+		return "", false
+	}
+	return n, true
 }
 
 func decodeStrict(w http.ResponseWriter, r *http.Request, v any) error {
@@ -100,6 +154,21 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+	w.status = http.StatusSwitchingProtocols
+	return h.Hijack()
 }
 
 func logRequests(logger *slog.Logger) func(http.Handler) http.Handler {

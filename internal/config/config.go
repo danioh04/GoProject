@@ -1,12 +1,16 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 type Config struct {
 	Addr        string
 	LogLevel    string
 	LogFormat   string
 	DatabaseURL string
+	MaxPlayers  int
 }
 
 func Load() Config {
@@ -15,12 +19,22 @@ func Load() Config {
 		LogLevel:    envOr("LOG_LEVEL", "info"),
 		LogFormat:   envOr("LOG_FORMAT", "text"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
+		MaxPlayers:  envIntOr("MAX_ROOM_SIZE", 8),
 	}
 }
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envIntOr(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
 	}
 	return fallback
 }

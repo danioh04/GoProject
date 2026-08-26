@@ -1,14 +1,21 @@
 package room_test
 
 import (
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"geoduel/internal/room"
+	"geoduel/internal/wsutil"
 )
 
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func TestLifecycle(t *testing.T) {
-	r := room.Start("room-1", "ABC234", "dan")
+	r := room.Start("room-1", "ABC234", "dan", 8, testLogger())
 
 	snap := r.Snapshot()
 	if snap.ID != "room-1" || snap.JoinCode != "ABC234" || snap.HostNickname != "dan" {
@@ -33,12 +40,30 @@ func TestLifecycle(t *testing.T) {
 }
 
 func TestSnapshotIsCopySafe(t *testing.T) {
-	r := room.Start("id", "XYZ789", "host")
-	r.Close()
+	r := room.Start("id", "XYZ789", "host", 8, testLogger())
+	defer r.Close()
 
 	snap := r.Snapshot()
 	snap.State = "tampered"
 	if r.Snapshot().State == "tampered" {
 		t.Error("Snapshot returned shared mutable state")
+	}
+}
+
+func TestNotifyAfterCloseIsSafe(t *testing.T) {
+	r := room.Start("id", "XYZ789", "host", 8, testLogger())
+	r.Close()
+	<-r.Done()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.NotifyInbound("ghost", wsutil.Envelope{Version: 1, Type: wsutil.TypePing})
+		r.NotifyDisconnect("ghost")
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Notify calls blocked after Close")
 	}
 }
