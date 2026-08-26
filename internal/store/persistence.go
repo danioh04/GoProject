@@ -49,31 +49,27 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Exec(ctx,
+	batch := &pgx.Batch{}
+
+	batch.Queue(
 		`INSERT INTO games (id, created_at, total_rounds) VALUES ($1, $2, $3)`,
-		g.ID, g.CreatedAt, g.TotalRounds)
-	if err != nil {
-		return fmt.Errorf("insert game: %w", err)
-	}
+		g.ID, g.CreatedAt, g.TotalRounds,
+	)
 
 	for placement, st := range g.Standings {
-		_, err = tx.Exec(ctx,
+		batch.Queue(
 			`INSERT INTO game_players (game_id, player_id, nickname, total_score, placement)
 			 VALUES ($1, $2, $3, $4, $5)`,
-			g.ID, string(st.PlayerID), st.Nickname, st.Total, placement+1)
-		if err != nil {
-			return fmt.Errorf("insert player %s: %w", st.PlayerID, err)
-		}
+			g.ID, string(st.PlayerID), st.Nickname, st.Total, placement+1,
+		)
 	}
 
 	for _, rnd := range g.Rounds {
-		_, err = tx.Exec(ctx,
+		batch.Queue(
 			`INSERT INTO rounds (game_id, round, location_id, target_lat, target_lng)
 			 VALUES ($1, $2, $3, $4, $5)`,
-			g.ID, rnd.Number, rnd.LocationID, rnd.Target.Lat, rnd.Target.Lng)
-		if err != nil {
-			return fmt.Errorf("insert round %d: %w", rnd.Number, err)
-		}
+			g.ID, rnd.Number, rnd.LocationID, rnd.Target.Lat, rnd.Target.Lng,
+		)
 	}
 
 	for _, rnd := range g.Rounds {
@@ -83,14 +79,23 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 				lat, lng = res.Guess.Lat, res.Guess.Lng
 				dist = res.DistanceM
 			}
-			_, err = tx.Exec(ctx,
+			batch.Queue(
 				`INSERT INTO guesses (game_id, round, player_id, lat, lng, distance_m, score)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-				g.ID, rnd.Number, string(res.PlayerID), lat, lng, dist, res.Score)
-			if err != nil {
-				return fmt.Errorf("insert guess %s r%d: %w", res.PlayerID, rnd.Number, err)
-			}
+				g.ID, rnd.Number, string(res.PlayerID), lat, lng, dist, res.Score,
+			)
 		}
+	}
+
+	br := tx.SendBatch(ctx, batch)
+	for i := 0; i < batch.Len(); i++ {
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return fmt.Errorf("batch insert item %d: %w", i, err)
+		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("close batch: %w", err)
 	}
 
 	return tx.Commit(ctx)

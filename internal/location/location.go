@@ -1,55 +1,55 @@
-// Package location loads and draws from the curated panorama pool.
 package location
 
 import (
-	_ "embed"
-	"encoding/json"
-	"fmt"
 	"math/rand/v2"
 
 	"geoduel/internal/game"
 )
 
-//go:embed locations.json
-var raw []byte
-
+// Pool holds the available catalog of geographic locations for matches.
 type Pool struct {
 	locations []game.Location
 }
 
-func Load() (*Pool, error) {
-	var locs []game.Location
-	if err := json.Unmarshal(raw, &locs); err != nil {
-		return nil, fmt.Errorf("parse locations.json: %w", err)
+// New creates a location pool initialized with curated world locations.
+func New(locations ...[]game.Location) *Pool {
+	locs := WorldLocations
+	if len(locations) > 0 && locations[0] != nil {
+		locs = locations[0]
 	}
-	seen := make(map[string]struct{}, len(locs))
-	for i, l := range locs {
-		if l.ID == "" {
-			return nil, fmt.Errorf("location %d missing id", i)
-		}
-		if _, dup := seen[l.ID]; dup {
-			return nil, fmt.Errorf("duplicate location id %q", l.ID)
-		}
-		seen[l.ID] = struct{}{}
-		if !l.LatLng().Valid() {
-			return nil, fmt.Errorf("location %q has invalid coordinates", l.ID)
-		}
+	return &Pool{
+		locations: locs,
 	}
-	return &Pool{locations: locs}, nil
 }
 
-func (p *Pool) Len() int { return len(p.locations) }
+// Len returns the number of locations available in the pool.
+func (p *Pool) Len() int {
+	return len(p.locations)
+}
 
+// Pick returns n randomly selected unique locations from the pool.
 func (p *Pool) Pick(n int) []game.Location {
 	return p.pickWith(nil, n)
 }
 
+// Picker returns a closure that picks n locations using the provided RNG.
+func (p *Pool) Picker(rnd *rand.Rand) func(n int) []game.Location {
+	return func(n int) []game.Location {
+		return p.pickWith(rnd, n)
+	}
+}
+
 func (p *Pool) pickWith(rnd *rand.Rand, n int) []game.Location {
-	if n <= 0 || n > len(p.locations) {
+	if n <= 0 {
 		return nil
 	}
+	if n > len(p.locations) {
+		n = len(p.locations)
+	}
+
 	shuffled := make([]game.Location, len(p.locations))
 	copy(shuffled, p.locations)
+
 	if rnd != nil {
 		rnd.Shuffle(len(shuffled), func(i, j int) {
 			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
@@ -59,11 +59,6 @@ func (p *Pool) pickWith(rnd *rand.Rand, n int) []game.Location {
 			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 		})
 	}
-	return shuffled[:n]
-}
 
-func (p *Pool) Picker(rnd *rand.Rand) func(n int) []game.Location {
-	return func(n int) []game.Location {
-		return p.pickWith(rnd, n)
-	}
+	return shuffled[:n]
 }

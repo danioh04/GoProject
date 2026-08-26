@@ -58,6 +58,30 @@ func TestHealthzRejectsNonGet(t *testing.T) {
 	}
 }
 
+func TestConfigEndpoint(t *testing.T) {
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{}), nil, "test-api-key-xyz"))
+	defer srv.Close()
+
+	resp, err := srv.Client().Get(srv.URL + "/v1/config")
+	if err != nil {
+		t.Fatalf("GET /v1/config: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var got struct {
+		GoogleMapsAPIKey string `json:"google_maps_api_key"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.GoogleMapsAPIKey != "test-api-key-xyz" {
+		t.Errorf("google_maps_api_key = %q, want test-api-key-xyz", got.GoogleMapsAPIKey)
+	}
+}
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

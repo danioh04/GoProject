@@ -109,6 +109,7 @@ type Room struct {
 
 	closeMu sync.RWMutex
 	closed  bool
+	bgWg    sync.WaitGroup
 }
 
 func Start(opts Options) *Room {
@@ -161,6 +162,7 @@ func (r *Room) shutdown() {
 		session.Kick()
 	}
 	r.publishClosed()
+	r.bgWg.Wait()
 	close(r.done)
 }
 
@@ -307,7 +309,9 @@ func (r *Room) flushMatch(standings []game.Standing, rounds []FinishedRound) {
 		Rounds:      rounds,
 	}
 
+	r.bgWg.Add(1)
 	go func() {
+		defer r.bgWg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := r.store.SaveGame(ctx, fg); err != nil {
@@ -422,12 +426,19 @@ func (r *Room) publish() {
 	case game.PhaseFinished:
 		state = PhaseFinished
 	}
+	hostNick := r.label
+	for _, p := range r.engine.Roster() {
+		if p.IsHost {
+			hostNick = p.Nickname
+			break
+		}
+	}
 	r.snapshot.Store(&Snapshot{
 		ID:           r.id,
 		JoinCode:     r.joinCode,
 		State:        state,
 		PlayerCount:  r.engine.PlayerCount(),
-		HostNickname: r.label,
+		HostNickname: hostNick,
 	})
 }
 

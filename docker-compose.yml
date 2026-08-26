@@ -9,6 +9,7 @@ services:
       LOG_FORMAT: json
       DEBUG_ADDR: ":6060"
       DATABASE_URL: postgres://geoduel:geoduel@db:5432/geoduel?sslmode=disable
+      GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY:-}"
     ports:
       - "8080:8080"
       - "6060:6060"

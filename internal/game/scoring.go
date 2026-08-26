@@ -18,7 +18,8 @@ func haversineMeters(a, b LatLng) float64 {
 	sinDLng := math.Sin(dLng / 2)
 	h := sinDLat*sinDLat + math.Cos(lat1)*math.Cos(lat2)*sinDLng*sinDLng
 
-	return 2 * earthRadiusM * math.Asin(math.Min(1, math.Sqrt(h)))
+	clamped := math.Max(0, math.Min(1, h))
+	return 2 * earthRadiusM * math.Asin(math.Sqrt(clamped))
 }
 
 func Score(guess, target LatLng, maxScore int) int {

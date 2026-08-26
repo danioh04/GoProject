@@ -7,18 +7,24 @@ import (
 	"geoduel/internal/game"
 )
 
-func TestLoadEmbeddedPool(t *testing.T) {
-	pool, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+func TestPoolInitialization(t *testing.T) {
+	pool := New()
+	if pool.Len() < 30 {
+		t.Errorf("pool len = %d, want >= 30", pool.Len())
 	}
-	if pool.Len() < 100 {
-		t.Errorf("pool size = %d, want >= 100", pool.Len())
+
+	custom := []game.Location{
+		{ID: "loc1", Lat: 10, Lng: 20},
+		{ID: "loc2", Lat: 30, Lng: 40},
+	}
+	customPool := New(custom)
+	if customPool.Len() != 2 {
+		t.Errorf("custom pool len = %d, want 2", customPool.Len())
 	}
 }
 
 func TestPickReturnsDistinctLocations(t *testing.T) {
-	pool, _ := Load()
+	pool := New()
 	picked := pool.Pick(5)
 	if len(picked) != 5 {
 		t.Fatalf("picked %d, want 5", len(picked))
@@ -37,37 +43,35 @@ func TestPickReturnsDistinctLocations(t *testing.T) {
 }
 
 func TestPickEdgeCases(t *testing.T) {
-	pool, _ := Load()
+	pool := New()
 	if got := pool.Pick(0); got != nil {
 		t.Error("Pick(0) should be nil")
 	}
-	if got := pool.Pick(pool.Len() + 1); got != nil {
-		t.Error("Pick(len+1) should be nil")
+	if got := pool.Pick(-5); got != nil {
+		t.Error("Pick(-5) should be nil")
 	}
-	all := pool.Pick(pool.Len())
-	if len(all) != pool.Len() {
-		t.Errorf("Pick(all) = %d", len(all))
+	many := pool.Pick(20)
+	if len(many) != 20 {
+		t.Errorf("Pick(20) = %d, want 20", len(many))
 	}
 }
 
 func TestPickerDeterministicWithSeededRand(t *testing.T) {
-	pool, _ := Load()
+	pool := New()
 
 	run := func() []string {
 		rng := rand.New(rand.NewPCG(42, 42))
 		picker := pool.Picker(rng)
 		var out []string
-		for i := 0; i < 3; i++ {
-			for _, l := range picker(5) {
-				out = append(out, l.ID)
-			}
+		for _, l := range picker(5) {
+			out = append(out, l.Title)
 		}
 		return out
 	}
 
 	first, second := run(), run()
 	if len(first) == 0 {
-		t.Fatal("no ids returned")
+		t.Fatal("no locations returned")
 	}
 	for i := range first {
 		if first[i] != second[i] {

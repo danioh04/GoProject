@@ -114,14 +114,15 @@ func (h *Hub) Shutdown(wait time.Duration) int {
 func generateCode() string {
 	limit := 256 - 256%len(codeAlphabet)
 	var out [codeLen]byte
-	buf := make([]byte, 0, 32)
+	var buf [16]byte
+	bufIdx := len(buf)
 	for i := 0; i < codeLen; {
-		if len(buf) == 0 {
-			buf = make([]byte, 32)
-			rand.Read(buf)
+		if bufIdx >= len(buf) {
+			rand.Read(buf[:])
+			bufIdx = 0
 		}
-		b := buf[0]
-		buf = buf[1:]
+		b := buf[bufIdx]
+		bufIdx++
 		if int(b) < limit {
 			out[i] = codeAlphabet[int(b)%len(codeAlphabet)]
 			i++

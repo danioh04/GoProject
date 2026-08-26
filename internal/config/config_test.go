@@ -8,7 +8,7 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	// Clear relevant env vars
-	for _, k := range []string{"ADDR", "LOG_LEVEL", "LOG_FORMAT", "DATABASE_URL", "MAX_ROOM_SIZE", "ROUNDS", "ROUND_SECONDS", "REVEAL_SECONDS", "DEBUG_ADDR"} {
+	for _, k := range []string{"ADDR", "LOG_LEVEL", "LOG_FORMAT", "DATABASE_URL", "MAX_ROOM_SIZE", "ROUNDS", "ROUND_SECONDS", "REVEAL_SECONDS", "DEBUG_ADDR", "GOOGLE_MAPS_API_KEY"} {
 		t.Setenv(k, "")
 	}
 
@@ -28,6 +28,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DebugAddr != "" {
 		t.Errorf("DebugAddr = %q, want empty", cfg.DebugAddr)
 	}
+	if cfg.GoogleMapsAPIKey != "" {
+		t.Errorf("GoogleMapsAPIKey = %q, want empty", cfg.GoogleMapsAPIKey)
+	}
 }
 
 func TestLoadCustomValues(t *testing.T) {
@@ -40,6 +43,7 @@ func TestLoadCustomValues(t *testing.T) {
 	t.Setenv("ROUND_SECONDS", "30")
 	t.Setenv("REVEAL_SECONDS", "5")
 	t.Setenv("DEBUG_ADDR", ":6060")
+	t.Setenv("GOOGLE_MAPS_API_KEY", "AIzaSyTestKey123")
 
 	cfg := config.Load()
 	if cfg.Addr != ":9090" || cfg.LogLevel != "debug" || cfg.LogFormat != "json" {
@@ -53,6 +57,9 @@ func TestLoadCustomValues(t *testing.T) {
 	}
 	if cfg.DebugAddr != ":6060" {
 		t.Errorf("DebugAddr = %q, want :6060", cfg.DebugAddr)
+	}
+	if cfg.GoogleMapsAPIKey != "AIzaSyTestKey123" {
+		t.Errorf("GoogleMapsAPIKey = %q, want AIzaSyTestKey123", cfg.GoogleMapsAPIKey)
 	}
 }
 

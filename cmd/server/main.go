@@ -38,11 +38,8 @@ func run(ctx context.Context) error {
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
-	pool, err := location.Load()
-	if err != nil {
-		return fmt.Errorf("load locations: %w", err)
-	}
-	logger.Info("location pool loaded", "count", pool.Len())
+	pool := location.New()
+	logger.Info("location pool initialized", "locations", pool.Len())
 
 	gameCfg := game.DefaultConfig()
 	gameCfg.Rounds = cfg.Rounds
@@ -53,6 +50,7 @@ func run(ctx context.Context) error {
 	var persistence api.Persistence
 	if cfg.DatabaseURL != "" {
 		bootCtx, cancelBoot := context.WithTimeout(context.Background(), 10*time.Second)
+		var err error
 		pgStore, err = store.Open(bootCtx, cfg.DatabaseURL)
 		cancelBoot()
 		if err != nil {
@@ -80,14 +78,19 @@ func run(ctx context.Context) error {
 	rooms := hub.New(logger, opts)
 
 	srv := &http.Server{
-		Handler:           api.New(logger, rooms, persistence),
+		Handler:           api.New(logger, rooms, persistence, cfg.GoogleMapsAPIKey),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	var debugSrv *http.Server
 	if cfg.DebugAddr != "" {
+		debugSrv = &http.Server{
+			Addr:              cfg.DebugAddr,
+			ReadHeaderTimeout: 3 * time.Second,
+		}
 		go func() {
 			logger.Info("debug server listening", "addr", cfg.DebugAddr)
-			if err := http.ListenAndServe(cfg.DebugAddr, nil); err != nil {
+			if err := debugSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("debug server failed", "error", err)
 			}
 		}()
@@ -117,6 +120,9 @@ func run(ctx context.Context) error {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	if debugSrv != nil {
+		_ = debugSrv.Shutdown(shutdownCtx)
 	}
 
 	logger.Info("stopping rooms")

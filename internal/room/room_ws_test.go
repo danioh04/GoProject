@@ -238,6 +238,9 @@ func TestHostPromotionOnHostLeave(t *testing.T) {
 	if string(players.Players[0].PlayerID) == ida.PlayerID {
 		t.Error("stale host id in roster")
 	}
+	if snap := r.Snapshot(); snap.HostNickname != "bob" {
+		t.Errorf("snapshot host nickname = %q, want bob", snap.HostNickname)
+	}
 
 	b.close(t)
 	select {

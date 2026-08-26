@@ -20,7 +20,6 @@ import (
 	"geoduel/internal/metrics"
 	"geoduel/internal/store"
 	"geoduel/internal/wsutil"
-	"geoduel/web"
 )
 
 const maxNicknameLen = 24
@@ -30,25 +29,37 @@ type Persistence interface {
 	GameDetail(ctx context.Context, id string) (*store.GameDetail, error)
 }
 
-func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence) http.Handler {
-	s := &server{logger: logger, rooms: rooms, stats: persistence}
+func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence, googleMapsAPIKey ...string) http.Handler {
+	var key string
+	if len(googleMapsAPIKey) > 0 {
+		key = googleMapsAPIKey[0]
+	}
+	s := &server{logger: logger, rooms: rooms, stats: persistence, googleMapsAPIKey: key}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handleRoot)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /v1/config", s.handleConfig)
 	mux.HandleFunc("POST /v1/rooms", s.handleCreateRoom)
 	mux.HandleFunc("GET /v1/rooms/{code}", s.handleGetRoom)
 	mux.HandleFunc("GET /v1/ws", s.handleWS)
 	mux.HandleFunc("GET /v1/stats/hardest", s.handleHardestLocations)
 	mux.HandleFunc("GET /v1/games/{id}", s.handleGameDetail)
-	mux.Handle("GET /", http.FileServerFS(web.Static()))
 
 	return logRequests(logger)(requestIDs(recoverPanics(logger)(mux)))
 }
 
 type server struct {
-	logger *slog.Logger
-	rooms  *hub.Hub
-	stats  Persistence
+	logger           *slog.Logger
+	rooms            *hub.Hub
+	stats            Persistence
+	googleMapsAPIKey string
+}
+
+func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"google_maps_api_key": s.googleMapsAPIKey,
+	})
 }
 
 func (s *server) handleHardestLocations(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +101,23 @@ func (s *server) handleGameDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service": "geoduel",
+		"status":  "ok",
+		"version": "1.0",
+		"endpoints": map[string]string{
+			"health":      "GET /healthz",
+			"config":      "GET /v1/config",
+			"create_room": "POST /v1/rooms",
+			"get_room":    "GET /v1/rooms/{code}",
+			"websocket":   "GET /v1/ws?code={code}&name={name}",
+			"stats":       "GET /v1/stats/hardest",
+			"game_detail": "GET /v1/games/{id}",
+		},
+	})
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -154,10 +182,12 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	playerID := outcome.PlayerID
 	metrics.WSConns.Add(1)
+	s.logger.Info("websocket attached", "join_code", code, "player_id", playerID, "nickname", nickname)
 	session.Run(func(env wsutil.Envelope) {
 		room.NotifyInbound(playerID, env)
 	}, func() {
 		metrics.WSConns.Add(-1)
+		s.logger.Info("websocket disconnected", "join_code", code, "player_id", playerID)
 		room.NotifyDisconnect(playerID)
 	})
 }
@@ -221,6 +251,10 @@ func (w *statusWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
