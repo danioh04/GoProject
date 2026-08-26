@@ -14,6 +14,7 @@ import (
 
 	"geoduel/internal/api"
 	"geoduel/internal/config"
+	"geoduel/internal/hub"
 )
 
 func main() {
@@ -31,8 +32,10 @@ func run(ctx context.Context) error {
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
+	rooms := hub.New(logger)
+
 	srv := &http.Server{
-		Handler:           api.New(logger),
+		Handler:           api.New(logger, rooms),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -60,6 +63,11 @@ func run(ctx context.Context) error {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+
+	logger.Info("stopping rooms")
+	if closed := rooms.Shutdown(3 * time.Second); closed > 0 {
+		logger.Info("rooms stopped", "count", closed)
 	}
 	logger.Info("stopped")
 	return nil

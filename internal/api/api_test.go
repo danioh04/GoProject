@@ -9,10 +9,11 @@ import (
 	"testing"
 
 	"geoduel/internal/api"
+	"geoduel/internal/hub"
 )
 
 func TestHealthz(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger()))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger())))
 	defer srv.Close()
 
 	resp, err := srv.Client().Get(srv.URL + "/healthz")
@@ -42,7 +43,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestHealthzRejectsNonGet(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger()))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger())))
 	defer srv.Close()
 
 	resp, err := srv.Client().Post(srv.URL+"/healthz", "application/json", nil)
