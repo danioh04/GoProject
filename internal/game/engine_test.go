@@ -233,6 +233,9 @@ func TestFullMatchLifecycle(t *testing.T) {
 		if len(end.Standings) != 2 {
 			t.Fatalf("standings size = %d", len(end.Standings))
 		}
+		if len(end.Rounds) != 3 {
+			t.Fatalf("rounds history size = %d, want 3", len(end.Rounds))
+		}
 		if end.Standings[0].Total < end.Standings[1].Total {
 			t.Errorf("standings unsorted: %+v", end.Standings)
 		}
@@ -441,5 +444,34 @@ func TestStandingsTiebreakByJoinOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(end.Standings[0], Standing{"a", "alice", e.cfg.MaxScore}) {
 		t.Errorf("standing wrong: %+v", end.Standings[0])
+	}
+}
+
+func BenchmarkEngineFullMatch(b *testing.B) {
+	locs := testLocations()
+	pick := func(n int) []Location {
+		return locs[:n]
+	}
+	cfg := DefaultConfig()
+	cfg.Rounds = 5
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		e := New(cfg, time.Now, pick)
+		e.Apply(JoinEvent{"p1", "alice"})
+		e.Apply(JoinEvent{"p2", "bob"})
+		e.Apply(JoinEvent{"p3", "carol"})
+		e.Apply(JoinEvent{"p4", "dave"})
+		e.Apply(StartEvent{"p1"})
+
+		for rnd := 1; rnd <= 5; rnd++ {
+			e.Apply(GuessEvent{"p1", LatLng{48.85, 2.35}})
+			e.Apply(GuessEvent{"p2", LatLng{35.67, 139.65}})
+			e.Apply(GuessEvent{"p3", LatLng{-33.86, 151.20}})
+			e.Apply(GuessEvent{"p4", LatLng{30.04, 31.23}})
+			e.Apply(TimeoutEvent{TimerTag{TimerReveal, rnd}})
+		}
 	}
 }

@@ -197,8 +197,16 @@ type RoundRevealedAction struct {
 	Results []RoundResult
 }
 
+type FinishedRound struct {
+	Number     int           `json:"number"`
+	LocationID string        `json:"location_id"`
+	Target     LatLng        `json:"target"`
+	Results    []RoundResult `json:"results"`
+}
+
 type MatchEndedAction struct {
 	Standings []Standing
+	Rounds    []FinishedRound
 }
 
 type TimerScheduledAction struct {

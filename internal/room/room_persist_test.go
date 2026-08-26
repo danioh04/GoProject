@@ -60,34 +60,33 @@ func TestMatchIsPersistedOnGameOver(t *testing.T) {
 	dial := startRoomServer(t, r)
 
 	a := dial("alice")
-	tokenA := mustReadToken(t, a)
+	a.readEnvelope(t)
 	a.readEnvelope(t)
 	b := dial("bob")
-	tokenB := mustReadToken(t, b)
+	b.readEnvelope(t)
 	b.readEnvelope(t)
 	a.readEnvelope(t)
 
-	a.send(t, wsutil.Envelope{Version: 1, Type: wsutil.TypeStartGame, Token: tokenA})
+	a.send(t, wsutil.Envelope{Version: 1, Type: wsutil.TypeStartGame})
 	assertType(t, a, wsutil.TypeGameStart)
 	assertType(t, a, wsutil.TypeRoundStart)
 	assertType(t, b, wsutil.TypeGameStart)
 	assertType(t, b, wsutil.TypeRoundStart)
 
-	b.send(t, guessEnvelope(tokenB, 48.8566, 2.3522))
+	b.send(t, guessEnvelope(48.8566, 2.3522))
 	assertType(t, b, wsutil.TypeGuessAck)
-	a.send(t, guessEnvelope(tokenA, 0, 0))
+	a.send(t, guessEnvelope(0, 0))
 	assertType(t, a, wsutil.TypeGuessAck)
 
 	assertType(t, a, wsutil.TypeRoundResult)
 	assertType(t, b, wsutil.TypeRoundResult)
 
-	tokens := map[*testClient]string{a: tokenA, b: tokenB}
 	for _, c := range []*testClient{a, b} {
 		env := waitForEnvelope(t, c, func(typ string) bool {
 			return typ == wsutil.TypeRoundStart || typ == wsutil.TypeGameOver
 		})
 		if env.Type == wsutil.TypeRoundStart {
-			c.send(t, guessEnvelope(tokens[c], -33.8688, 151.2093))
+			c.send(t, guessEnvelope(-33.8688, 151.2093))
 			assertType(t, c, wsutil.TypeGuessAck)
 		}
 	}

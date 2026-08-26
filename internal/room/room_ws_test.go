@@ -102,13 +102,12 @@ func TestAttachRosterAndIdentity(t *testing.T) {
 	}
 	var identity struct {
 		PlayerID string `json:"player_id"`
-		Token    string `json:"token"`
 		Host     bool   `json:"host"`
 	}
 	if err := json.Unmarshal(joinedA.Payload, &identity); err != nil {
 		t.Fatalf("decode joined payload: %v", err)
 	}
-	if identity.PlayerID == "" || identity.Token == "" || !identity.Host {
+	if identity.PlayerID == "" || !identity.Host {
 		t.Errorf("bad identity payload: %+v", identity)
 	}
 	if roster := a.readEnvelope(t); roster.Type != wsutil.TypeRoster {
@@ -248,40 +247,21 @@ func TestHostPromotionOnHostLeave(t *testing.T) {
 	}
 }
 
-func TestPingPongWithTokenAuth(t *testing.T) {
+func TestUnsupportedMessageType(t *testing.T) {
 	r := room.Start(room.Options{ID: "rm5", JoinCode: "ROOMRT", Logger: testLogger(), Picker: testPicker})
 	dial := startRoomServer(t, r)
 	defer r.Close()
 
 	a := dial("alice")
-	joinedA := a.readEnvelope(t)
 	a.readEnvelope(t)
-	var ident struct {
-		Token string `json:"token"`
-	}
-	json.Unmarshal(joinedA.Payload, &ident)
+	a.readEnvelope(t)
 
-	a.send(t, wsutil.Envelope{Version: 1, Type: wsutil.TypePing})
-	if env := a.readEnvelope(t); env.Type != wsutil.TypeError {
-		t.Errorf("ping without token -> %q, want error", env.Type)
-	}
-
-	a.send(t, wsutil.Envelope{Version: 1, Type: wsutil.TypePing, Token: ident.Token + "x"})
-	if env := a.readEnvelope(t); env.Type != wsutil.TypeError {
-		t.Errorf("ping with bad token -> %q, want error", env.Type)
-	}
-
-	a.send(t, wsutil.Envelope{Version: 1, Type: wsutil.TypePing, Token: ident.Token})
-	if env := a.readEnvelope(t); env.Type != wsutil.TypePong {
-		t.Errorf("ping with good token -> %q, want pong", env.Type)
-	}
-
-	a.send(t, wsutil.Envelope{Version: 1, Type: "bogus", Token: ident.Token})
+	a.send(t, wsutil.Envelope{Version: 1, Type: "bogus"})
 	if env := a.readEnvelope(t); env.Type != wsutil.TypeError {
 		t.Errorf("bogus type -> %q, want error", env.Type)
 	}
 
-	a.send(t, wsutil.Envelope{Version: 99, Type: wsutil.TypePing, Token: ident.Token})
+	a.send(t, wsutil.Envelope{Version: 99, Type: wsutil.TypeGuess})
 	if env := a.readEnvelope(t); env.Type != wsutil.TypeError {
 		t.Errorf("bad version -> %q, want error", env.Type)
 	}

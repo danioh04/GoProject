@@ -24,7 +24,6 @@ const (
 
 	TypeGuess       = "guess"
 	TypeStartGame   = "start_game"
-	TypePing        = "ping"
 	TypeJoined      = "joined"
 	TypeRoster      = "roster"
 	TypeGameStart   = "game_start"
@@ -33,14 +32,12 @@ const (
 	TypeRoundResult = "round_result"
 	TypeGameOver    = "game_over"
 	TypeKicked      = "kicked"
-	TypePong        = "pong"
 	TypeError       = "error"
 )
 
 type Envelope struct {
 	Version int             `json:"v"`
 	Type    string          `json:"type"`
-	Token   string          `json:"token,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 

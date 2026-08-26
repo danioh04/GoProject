@@ -58,7 +58,7 @@ func TestNotifyAfterCloseIsSafe(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		r.NotifyInbound("ghost", wsutil.Envelope{Version: 1, Type: wsutil.TypePing})
+		r.NotifyInbound("ghost", wsutil.Envelope{Version: 1, Type: wsutil.TypeGuess})
 		r.NotifyDisconnect("ghost")
 	}()
 	select {

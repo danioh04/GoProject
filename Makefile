@@ -1,4 +1,4 @@
-.PHONY: run build test test-race fmt vet lint tidy compose-up compose-down clean
+.PHONY: run build test test-race bench fmt vet lint tidy compose-up compose-down clean
 
 run:
 	go run ./cmd/server
@@ -11,6 +11,9 @@ test:
 
 test-race:
 	go test ./... -race -count=1
+
+bench:
+	go test -run=^$$ -bench=. -benchmem ./internal/game/...
 
 fmt:
 	gofmt -l -w .

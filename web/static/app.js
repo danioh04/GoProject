@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
 	ws: null,
-	you: { id: null, token: null, isHost: false },
+	you: { id: null, isHost: false },
 	players: [],
 	phase: "home",
 	deadlineAt: null,
@@ -67,7 +67,6 @@ function send(type, payload) {
 	state.ws.send(JSON.stringify({
 		v: 1,
 		type,
-		token: state.you.token,
 		payload: payload ?? {},
 	}));
 }
@@ -78,7 +77,6 @@ function handle(msg) {
 	switch (msg.type) {
 		case "joined":
 			state.you.id = msg.payload.player_id;
-			state.you.token = msg.payload.token;
 			break;
 
 		case "roster":

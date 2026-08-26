@@ -14,13 +14,14 @@ type Engine struct {
 	now  func() time.Time
 	pick func(int) []Location
 
-	phase     Phase
-	players   map[PlayerID]*Player
-	order     []PlayerID
-	round     int
-	locations []Location
-	guesses   map[int]map[PlayerID]GuessRecord
-	totals    map[PlayerID]int
+	phase         Phase
+	players       map[PlayerID]*Player
+	order         []PlayerID
+	round         int
+	locations     []Location
+	guesses       map[int]map[PlayerID]GuessRecord
+	totals        map[PlayerID]int
+	roundsHistory []FinishedRound
 }
 
 type GuessRecord struct {
@@ -33,13 +34,14 @@ func New(cfg Config, now func() time.Time, pick func(n int) []Location) *Engine 
 		now = time.Now
 	}
 	return &Engine{
-		cfg:     cfg,
-		now:     now,
-		pick:    pick,
-		phase:   PhaseLobby,
-		players: make(map[PlayerID]*Player),
-		guesses: make(map[int]map[PlayerID]GuessRecord),
-		totals:  make(map[PlayerID]int),
+		cfg:           cfg,
+		now:           now,
+		pick:          pick,
+		phase:         PhaseLobby,
+		players:       make(map[PlayerID]*Player),
+		guesses:       make(map[int]map[PlayerID]GuessRecord),
+		totals:        make(map[PlayerID]int),
+		roundsHistory: make([]FinishedRound, 0, cfg.Rounds),
 	}
 }
 
@@ -220,6 +222,16 @@ func (e *Engine) revealNow() []Action {
 	}
 	sortResultsByScore(results, e.order)
 
+	loc := e.locations[e.round-1]
+	resultsCopy := make([]RoundResult, len(results))
+	copy(resultsCopy, results)
+	e.roundsHistory = append(e.roundsHistory, FinishedRound{
+		Number:     e.round,
+		LocationID: loc.ID,
+		Target:     target,
+		Results:    resultsCopy,
+	})
+
 	e.phase = PhaseReveal
 
 	return []Action{
@@ -245,7 +257,10 @@ func (e *Engine) applyTimeout(ev TimeoutEvent) []Action {
 func (e *Engine) advanceRound() []Action {
 	if e.round >= e.cfg.Rounds {
 		e.phase = PhaseFinished
-		return []Action{MatchEndedAction{Standings: e.sortedStandings()}}
+		return []Action{MatchEndedAction{
+			Standings: e.sortedStandings(),
+			Rounds:    e.roundsHistory,
+		}}
 	}
 	return e.beginRound(e.round + 1)
 }

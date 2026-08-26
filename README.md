@@ -51,8 +51,8 @@ clock, so the whole ruleset is tested instantly with fake time and zero sockets.
 | GET | `/healthz` | Liveness |
 
 WebSocket messages are versioned JSON envelopes (`{"v":1,"type":...,"payload":...}`). Client sends
-`guess`, `start_game`, `ping`; server sends `joined`, `roster`, `round_start`, `round_result`,
-`game_over`. A secret token issued at attach authenticates every action.
+`guess`, `start_game`; server sends `joined`, `roster`, `round_start`, `round_result`,
+`game_over`. Connection lifecycle and keep-alives use standard RFC 6455 control frames.
 
 ## Configuration
 
@@ -77,6 +77,7 @@ Spawns concurrent bot rooms that play full matches and report failures.
 
 ```bash
 make test        # unit + integration (DB tests skip without GEODUEL_TEST_DATABASE)
+make bench       # micro-benchmarks (0-alloc math + high-throughput FSM)
 GEODUEL_TEST_DATABASE=postgres://geoduel:geoduel@localhost:5432/geoduel?sslmode=disable \
   go test ./internal/store/
 make test-race   # race detector (CI runs this on every push)

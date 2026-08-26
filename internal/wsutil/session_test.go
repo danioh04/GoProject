@@ -85,7 +85,7 @@ func TestRunDeliversAndReportsClose(t *testing.T) {
 		}()
 	})
 
-	env, _ := wsutil.NewEnvelope(wsutil.TypePing, map[string]string{"x": "y"})
+	env, _ := wsutil.NewEnvelope(wsutil.TypeStartGame, map[string]string{"x": "y"})
 	b, err := json.Marshal(env)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -99,7 +99,7 @@ func TestRunDeliversAndReportsClose(t *testing.T) {
 
 	select {
 	case received := <-got:
-		if received.Type != wsutil.TypePing || string(received.Payload) != `{"x":"y"}` {
+		if received.Type != wsutil.TypeStartGame || string(received.Payload) != `{"x":"y"}` {
 			t.Errorf("received = %+v", received)
 		}
 	case <-time.After(3 * time.Second):

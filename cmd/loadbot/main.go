@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -22,34 +23,64 @@ func requestCtx() (context.Context, context.CancelFunc) {
 type envelope struct {
 	Version int             `json:"v"`
 	Type    string          `json:"type"`
-	Token   string          `json:"token,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type bot struct {
 	conn   *websocket.Conn
 	label  string
-	token  string
 	isHost bool
+	in     chan envelope
+	err    chan error
+}
+
+func (b *bot) readLoop() {
+	for {
+		_, data, err := b.conn.Read(context.Background())
+		if err != nil {
+			select {
+			case b.err <- err:
+			default:
+			}
+			return
+		}
+		var env envelope
+		if err := json.Unmarshal(data, &env); err == nil {
+			b.in <- env
+		}
+	}
 }
 
 func (b *bot) readUntil(want ...string) envelope {
-	for i := 0; i < 40; i++ {
-		ctx, cancel := requestCtx()
-		_, data, err := b.conn.Read(ctx)
-		cancel()
-		if err != nil {
-			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
-		}
-		var env envelope
-		json.Unmarshal(data, &env)
-		for _, w := range want {
-			if env.Type == w {
+	timeout := time.After(20 * time.Second)
+	for {
+		select {
+		case env := <-b.in:
+			if slices.Contains(want, env.Type) {
 				return env
 			}
+		case err := <-b.err:
+			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
+		case <-timeout:
+			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
 		}
 	}
-	panic(fmt.Sprintf("[%s] never received %v", b.label, want))
+}
+
+func (b *bot) waitForAny(want ...string) (envelope, bool) {
+	timeout := time.After(20 * time.Second)
+	for {
+		select {
+		case env := <-b.in:
+			if slices.Contains(want, env.Type) {
+				return env, env.Type != "game_over"
+			}
+		case err := <-b.err:
+			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
+		case <-timeout:
+			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
+		}
+	}
 }
 
 func main() {
@@ -108,7 +139,7 @@ func playMatch(addr string, n, perRoom int) error {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < perRoom; i++ {
+	for i := range perRoom {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -132,7 +163,7 @@ func playMatch(addr string, n, perRoom int) error {
 			break
 		}
 	}
-	host.send(envelope{Version: 1, Type: "start_game", Token: host.token})
+	host.send(envelope{Version: 1, Type: "start_game"})
 
 	guesses := 0
 	for _, b := range bots {
@@ -144,7 +175,7 @@ func playMatch(addr string, n, perRoom int) error {
 
 	roundsPlayed := 0
 	for {
-		rs, isRound := waitForAny(bots[0], "round_start", "game_over")
+		rs, isRound := bots[0].waitForAny("round_start", "game_over")
 		if !isRound {
 			break
 		}
@@ -162,7 +193,7 @@ func playMatch(addr string, n, perRoom int) error {
 			lat := -50 + rand.Float64()*115
 			lng := -170 + rand.Float64()*350
 			body, _ := json.Marshal(map[string]float64{"lat": lat, "lng": lng})
-			b.send(envelope{Version: 1, Type: "guess", Token: b.token, Payload: body})
+			b.send(envelope{Version: 1, Type: "guess", Payload: body})
 			b.readUntil("guess_ack")
 			guesses++
 		}
@@ -172,29 +203,10 @@ func playMatch(addr string, n, perRoom int) error {
 	}
 
 	for _, b := range bots[1:] {
-		waitForAny(b, "game_over")
+		b.waitForAny("game_over")
 	}
 	fmt.Printf("room %02d complete (%d rounds, %d guesses)\n", n, roundsPlayed, guesses)
 	return nil
-}
-
-func waitForAny(b *bot, types ...string) (envelope, bool) {
-	for i := 0; i < 60; i++ {
-		ctx, cancel := requestCtx()
-		_, data, err := b.conn.Read(ctx)
-		cancel()
-		if err != nil {
-			panic(fmt.Sprintf("[%s] read %v: %v", b.label, types, err))
-		}
-		var env envelope
-		json.Unmarshal(data, &env)
-		for _, w := range types {
-			if env.Type == w {
-				return env, env.Type != "game_over"
-			}
-		}
-	}
-	panic(fmt.Sprintf("[%s] never received %v", b.label, types))
 }
 
 func createRoom(addr, nickname string) (string, error) {
@@ -221,14 +233,18 @@ func join(addr, code, name string) (*bot, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := &bot{conn: conn, label: name}
+	b := &bot{
+		conn:  conn,
+		label: name,
+		in:    make(chan envelope, 64),
+		err:   make(chan error, 1),
+	}
+	go b.readLoop()
 	joined := b.readUntil("joined")
 	var p struct {
-		Token string `json:"token"`
-		Host  bool   `json:"host"`
+		Host bool `json:"host"`
 	}
 	json.Unmarshal(joined.Payload, &p)
-	b.token = p.Token
 	b.isHost = p.Host
 	return b, nil
 }
