@@ -1,3 +1,6 @@
+// Package room bridges WebSocket sessions and the game engine: it translates
+// transport events into engine inputs, executes engine actions, and owns
+// connection lifecycle, timers, and persistence.
 package room
 
 import (

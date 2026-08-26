@@ -1,3 +1,5 @@
+// Package wsutil provides WebSocket upgrades, read/write pumps, message
+// envelopes, and per-connection sessions with bounded outbound buffers.
 package wsutil
 
 import (
