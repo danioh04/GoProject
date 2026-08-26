@@ -19,7 +19,7 @@ import (
 )
 
 func TestWSRejectsBeforeUpgrade(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{})))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{}), nil))
 	defer srv.Close()
 
 	cases := []struct {
@@ -51,7 +51,7 @@ func TestWSRejectsBeforeUpgrade(t *testing.T) {
 }
 
 func TestWSEndToEndThroughAPI(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{})))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{}), nil))
 	defer srv.Close()
 
 	resp, err := srv.Client().Post(srv.URL+"/v1/rooms", "application/json", strings.NewReader(`{"nickname":"host"}`))

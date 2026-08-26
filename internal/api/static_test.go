@@ -18,7 +18,7 @@ func newTestHub() *hub.Hub {
 }
 
 func TestStaticIndexServed(t *testing.T) {
-	srv := httptest.NewServer(api.New(newTestLoggerForStatic(), newTestHub()))
+	srv := httptest.NewServer(api.New(newTestLoggerForStatic(), newTestHub(), nil))
 	defer srv.Close()
 
 	resp, err := srv.Client().Get(srv.URL + "/")
@@ -36,7 +36,7 @@ func TestStaticIndexServed(t *testing.T) {
 }
 
 func TestStaticAssetsServed(t *testing.T) {
-	srv := httptest.NewServer(api.New(newTestLoggerForStatic(), newTestHub()))
+	srv := httptest.NewServer(api.New(newTestLoggerForStatic(), newTestHub(), nil))
 	defer srv.Close()
 
 	for _, path := range []string{"/app.js", "/style.css", "/vendor/leaflet.js", "/vendor/leaflet.css"} {
@@ -56,7 +56,7 @@ func TestStaticAssetsServed(t *testing.T) {
 }
 
 func TestUnknownPathFallsThroughToStatic(t *testing.T) {
-	srv := httptest.NewServer(api.New(newTestLoggerForStatic(), newTestHub()))
+	srv := httptest.NewServer(api.New(newTestLoggerForStatic(), newTestHub(), nil))
 	defer srv.Close()
 
 	resp, err := srv.Client().Get(srv.URL + "/definitely-not-here")

@@ -1,6 +1,7 @@
 package room
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -45,6 +46,26 @@ type Options struct {
 	Logger     *slog.Logger
 	Picker     func(n int) []game.Location
 	Config     game.Config
+	Store      Store
+}
+
+type FinishedGame struct {
+	ID          string
+	CreatedAt   time.Time
+	TotalRounds int
+	Standings   []game.Standing
+	Rounds      []FinishedRound
+}
+
+type FinishedRound struct {
+	Number     int
+	LocationID string
+	Target     game.LatLng
+	Results    []game.RoundResult
+}
+
+type Store interface {
+	SaveGame(ctx context.Context, g FinishedGame) error
 }
 
 type AttachOutcome struct {
@@ -90,6 +111,8 @@ type Room struct {
 	engine   *game.Engine
 	sessions map[game.PlayerID]connMeta
 	timers   map[game.TimerKind]*time.Timer
+	store    Store
+	match    *matchLog
 
 	commands chan command
 	done     chan struct{}
@@ -118,6 +141,7 @@ func Start(opts Options) *Room {
 		engine:   game.New(opts.Config, time.Now, opts.Picker),
 		sessions: make(map[game.PlayerID]connMeta),
 		timers:   make(map[game.TimerKind]*time.Timer),
+		store:    opts.Store,
 		commands: make(chan command, commandBuffer),
 		done:     make(chan struct{}),
 	}
@@ -248,8 +272,13 @@ func (r *Room) execute(acts []game.Action) {
 		case game.MatchStartedAction:
 			env, _ := wsutil.NewEnvelope(wsutil.TypeGameStart, map[string]int{"total_rounds": act.TotalRounds})
 			r.broadcast(env)
+			r.match = &matchLog{
+				createdAt: time.Now().UTC(),
+				rounds:    make([]FinishedRound, act.TotalRounds),
+			}
 
 		case game.RoundStartedAction:
+			r.logRoundLocation(act.Round, act.Location.ID)
 			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundStart, roundStartPayload{
 				Round:        act.Round,
 				TotalRounds:  act.TotalRounds,
@@ -269,6 +298,7 @@ func (r *Room) execute(acts []game.Action) {
 			}
 
 		case game.RoundRevealedAction:
+			r.logReveal(act.Round, act.Target, act.Results)
 			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundResult, roundResultPayload{
 				Round:   act.Round,
 				Target:  act.Target,
@@ -279,6 +309,7 @@ func (r *Room) execute(acts []game.Action) {
 		case game.MatchEndedAction:
 			env, _ := wsutil.NewEnvelope(wsutil.TypeGameOver, gameOverPayload{Standings: act.Standings})
 			r.broadcast(env)
+			r.flushMatch(act.Standings)
 
 		case game.TimerScheduledAction:
 			r.armTimer(act.Tag, act.Delay)
@@ -297,6 +328,62 @@ func (r *Room) armTimer(tag game.TimerTag, delay time.Duration) {
 	r.timers[tag.Kind] = time.AfterFunc(delay, func() {
 		r.deliver(timeoutCommand{tag: tag})
 	})
+}
+
+type matchLog struct {
+	createdAt time.Time
+	rounds    []FinishedRound
+}
+
+func (r *Room) logRoundLocation(round int, locationID string) {
+	if r.match == nil || round < 1 || round > len(r.match.rounds) {
+		return
+	}
+	r.match.rounds[round-1].Number = round
+	r.match.rounds[round-1].LocationID = locationID
+}
+
+func (r *Room) logReveal(round int, target game.LatLng, results []game.RoundResult) {
+	if r.match == nil || round < 1 || round > len(r.match.rounds) {
+		return
+	}
+	dst := &r.match.rounds[round-1]
+	dst.Number = round
+	dst.Target = target
+	dst.Results = make([]game.RoundResult, len(results))
+	copy(dst.Results, results)
+}
+
+func (r *Room) flushMatch(standings []game.Standing) {
+	if r.store == nil || r.match == nil {
+		return
+	}
+	fg := FinishedGame{
+		ID:          newMatchID(),
+		CreatedAt:   r.match.createdAt,
+		TotalRounds: len(r.match.rounds),
+		Standings:   standings,
+		Rounds:      r.match.rounds,
+	}
+	r.match = nil
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := r.store.SaveGame(ctx, fg); err != nil {
+			r.logger.Error("save game failed", "game_id", fg.ID, "error", err)
+			return
+		}
+		r.logger.Info("game saved", "game_id", fg.ID)
+	}()
+}
+
+func newMatchID() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return time.Now().UTC().Format("20060102T150405.000000000")
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func (r *Room) stopTimers() {

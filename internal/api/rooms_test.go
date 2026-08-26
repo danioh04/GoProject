@@ -23,7 +23,7 @@ type roomSnapshot struct {
 }
 
 func TestCreateAndPreviewRoom(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{})))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{}), nil))
 	defer srv.Close()
 
 	resp := postJSON(t, srv, "/v1/rooms", `{"nickname": "dan"}`)
@@ -57,7 +57,7 @@ func TestCreateAndPreviewRoom(t *testing.T) {
 }
 
 func TestCreateRoomValidation(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{})))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{}), nil))
 	defer srv.Close()
 
 	cases := []struct {
@@ -84,7 +84,7 @@ func TestCreateRoomValidation(t *testing.T) {
 }
 
 func TestPreviewRoomErrors(t *testing.T) {
-	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{})))
+	srv := httptest.NewServer(api.New(testLogger(), hub.New(testLogger(), room.Options{}), nil))
 	defer srv.Close()
 
 	postJSON(t, srv, "/v1/rooms", `{"nickname": "dan"}`).Body.Close()

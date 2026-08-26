@@ -18,6 +18,7 @@ import (
 	"geoduel/internal/hub"
 	"geoduel/internal/location"
 	"geoduel/internal/room"
+	"geoduel/internal/store"
 )
 
 func main() {
@@ -46,14 +47,38 @@ func run(ctx context.Context) error {
 	gameCfg.RoundTime = time.Duration(cfg.RoundSeconds) * time.Second
 	gameCfg.RevealTime = time.Duration(cfg.RevealSeconds) * time.Second
 
-	rooms := hub.New(logger, room.Options{
+	var pgStore *store.Store
+	var persistence api.Persistence
+	if cfg.DatabaseURL != "" {
+		bootCtx, cancelBoot := context.WithTimeout(context.Background(), 10*time.Second)
+		pgStore, err = store.Open(bootCtx, cfg.DatabaseURL)
+		cancelBoot()
+		if err != nil {
+			return fmt.Errorf("connect to database: %w", err)
+		}
+		defer pgStore.Close()
+		if err := pgStore.Migrate(ctx); err != nil {
+			return fmt.Errorf("migrate database: %w", err)
+		}
+		persistence = pgStore
+		logger.Info("postgres ready")
+	} else {
+		logger.Info("postgres disabled", "reason", "DATABASE_URL not set")
+	}
+
+	opts := room.Options{
 		MaxPlayers: cfg.MaxPlayers,
 		Picker:     pool.Picker(nil),
 		Config:     gameCfg,
-	})
+	}
+	if pgStore != nil {
+		opts.Store = pgStore
+	}
+
+	rooms := hub.New(logger, opts)
 
 	srv := &http.Server{
-		Handler:           api.New(logger, rooms),
+		Handler:           api.New(logger, rooms, persistence),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

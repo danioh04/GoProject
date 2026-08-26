@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,24 +10,33 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
 	"geoduel/internal/hub"
+	"geoduel/internal/store"
 	"geoduel/internal/wsutil"
 	"geoduel/web"
 )
 
 const maxNicknameLen = 24
 
-func New(logger *slog.Logger, rooms *hub.Hub) http.Handler {
-	s := &server{logger: logger, rooms: rooms}
+type Persistence interface {
+	HardestLocations(ctx context.Context, limit int) ([]store.LocationStat, error)
+	GameDetail(ctx context.Context, id string) (*store.GameDetail, error)
+}
+
+func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence) http.Handler {
+	s := &server{logger: logger, rooms: rooms, stats: persistence}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /v1/rooms", s.handleCreateRoom)
 	mux.HandleFunc("GET /v1/rooms/{code}", s.handleGetRoom)
 	mux.HandleFunc("GET /v1/ws", s.handleWS)
+	mux.HandleFunc("GET /v1/stats/hardest", s.handleHardestLocations)
+	mux.HandleFunc("GET /v1/games/{id}", s.handleGameDetail)
 	mux.Handle("GET /", http.FileServerFS(web.Static()))
 
 	return logRequests(logger)(recoverPanics(logger)(mux))
@@ -35,6 +45,48 @@ func New(logger *slog.Logger, rooms *hub.Hub) http.Handler {
 type server struct {
 	logger *slog.Logger
 	rooms  *hub.Hub
+	stats  Persistence
+}
+
+func (s *server) handleHardestLocations(w http.ResponseWriter, r *http.Request) {
+	if s.stats == nil {
+		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
+		return
+	}
+	limit := 10
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 50 {
+			writeErr(w, http.StatusBadRequest, "limit must be between 1 and 50")
+			return
+		}
+		limit = parsed
+	}
+	stats, err := s.stats.HardestLocations(r.Context(), limit)
+	if err != nil {
+		s.logger.Error("hardest locations query failed", "error", err)
+		writeErr(w, http.StatusInternalServerError, "stats unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"locations": stats})
+}
+
+func (s *server) handleGameDetail(w http.ResponseWriter, r *http.Request) {
+	if s.stats == nil {
+		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
+		return
+	}
+	detail, err := s.stats.GameDetail(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "game not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("game detail query failed", "error", err)
+		writeErr(w, http.StatusInternalServerError, "game lookup failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
