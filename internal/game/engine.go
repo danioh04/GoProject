@@ -171,7 +171,6 @@ func (e *Engine) beginRound(round int) []Action {
 			Round:        round,
 			TotalRounds:  e.cfg.Rounds,
 			Location:     LocationRef{ID: loc.ID, PanoID: loc.PanoID},
-			Hint:         loc.Hint,
 			Deadline:     deadline,
 			RoundSeconds: int(math.Ceil(e.cfg.RoundTime.Seconds())),
 		},

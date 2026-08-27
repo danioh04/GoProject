@@ -13,8 +13,8 @@ import (
 
 func matchLocations() []game.Location {
 	return []game.Location{
-		{ID: "paris", Lat: 48.8566, Lng: 2.3522, Hint: "An iron tower defines this river city's skyline."},
-		{ID: "tokyo", Lat: 35.6762, Lng: 139.6503, Hint: "The world's largest metro area, famed for its scramble crossing."},
+		{ID: "paris", Lat: 48.8566, Lng: 2.3522, PanoID: "0oU9oWv065S_VzV-H1G4kg"},
+		{ID: "tokyo", Lat: 35.6762, Lng: 139.6503, PanoID: "bYjJc805_n1a2gC4K4j3pQ"},
 	}
 }
 
@@ -122,13 +122,12 @@ func assertRoundStartSafe(t *testing.T, env wsutil.Envelope) {
 
 	var p struct {
 		Round   int    `json:"round"`
-		Hint    string `json:"hint"`
 		PanoID  string `json:"pano_id"`
 		Seconds int    `json:"seconds"`
 	}
 	json.Unmarshal(env.Payload, &p)
-	if p.Round != 1 || p.Hint == "" || p.Seconds != 1 {
-		t.Errorf("round_start payload missing clue fields: %s", raw)
+	if p.Round != 1 || p.PanoID == "" || p.Seconds != 1 {
+		t.Errorf("round_start payload missing pano_id or fields: %s", raw)
 	}
 
 	for _, leak := range []string{"paris", `"lat"`, `"lng"`, `"target"`, "48.85"} {

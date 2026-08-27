@@ -46,7 +46,6 @@ type Location struct {
 	Lat    float64 `json:"lat"`
 	Lng    float64 `json:"lng"`
 	Title  string  `json:"title,omitempty"`
-	Hint   string  `json:"hint,omitempty"`
 }
 
 func (l Location) LatLng() LatLng {
@@ -181,7 +180,6 @@ type RoundStartedAction struct {
 	Round        int
 	TotalRounds  int
 	Location     LocationRef
-	Hint         string
 	Deadline     time.Time
 	RoundSeconds int
 }

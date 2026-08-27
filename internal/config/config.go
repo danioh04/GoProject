@@ -18,6 +18,7 @@ type Config struct {
 	RevealSeconds    int
 	DebugAddr        string
 	GoogleMapsAPIKey string
+	MapFile          string
 }
 
 func Load() Config {
@@ -33,6 +34,7 @@ func Load() Config {
 		RevealSeconds:    envIntOr("REVEAL_SECONDS", 10),
 		DebugAddr:        os.Getenv("DEBUG_ADDR"),
 		GoogleMapsAPIKey: os.Getenv("GOOGLE_MAPS_API_KEY"),
+		MapFile:          os.Getenv("MAP_FILE"),
 	}
 }
 

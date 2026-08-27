@@ -38,8 +38,17 @@ func run(ctx context.Context) error {
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
-	pool := location.New()
-	logger.Info("location pool initialized", "locations", pool.Len())
+	pool := location.New(ctx, cfg.GoogleMapsAPIKey,
+		location.WithLogger(logger),
+		location.WithMapFile(cfg.MapFile),
+	)
+	defer pool.Close()
+	logger.Info("location pool ready", "map", pool.MapName())
+	if cfg.GoogleMapsAPIKey != "" {
+		logger.Info("dynamic google maps location discovery enabled")
+	} else {
+		logger.Info("dynamic location discovery running in offline simulation mode")
+	}
 
 	gameCfg := game.DefaultConfig()
 	gameCfg.Rounds = cfg.Rounds

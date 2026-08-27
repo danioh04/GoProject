@@ -250,7 +250,6 @@ func (r *Room) execute(acts []game.Action) {
 				Round:        act.Round,
 				TotalRounds:  act.TotalRounds,
 				PanoID:       act.Location.PanoID,
-				Hint:         act.Hint,
 				DeadlineUnix: act.Deadline.Unix(),
 				Seconds:      act.RoundSeconds,
 			})
@@ -459,7 +458,6 @@ type roundStartPayload struct {
 	Round        int    `json:"round"`
 	TotalRounds  int    `json:"total_rounds"`
 	PanoID       string `json:"pano_id,omitempty"`
-	Hint         string `json:"hint,omitempty"`
 	DeadlineUnix int64  `json:"deadline_unix"`
 	Seconds      int    `json:"seconds"`
 }

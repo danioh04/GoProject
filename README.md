@@ -1,6 +1,6 @@
 # GeoDuel
 
-A high-concurrency multiplayer GeoGuessr-style game server and WebSocket backend in Go. Rooms of 2–8 players join by code, receive identical location clues and 360° panoramas each round, submit their coordinate guesses, and are scored based on distance using spherical trigonometry. The server is strictly authoritative: clients only submit where they guessed—the true target location is guarded server-side and never leaked until round reveal.
+A high-concurrency multiplayer GeoGuessr-style game server and WebSocket backend in Go. Rooms of 2–8 players join by code, receive identical 360° Google Street View panoramas each round, submit their coordinate guesses, and are scored based on distance using spherical trigonometry. The server is strictly authoritative: clients only submit where they guessed—the true target location is guarded server-side and never leaked until round reveal.
 
 Built as a portfolio-grade backend showcasing idiomatic Go: actor-per-room concurrency, WebSocket streaming with backpressure, deterministic clock-injected finite state machines, PostgreSQL analytics, and race-free operation under high concurrent load.
 
@@ -57,6 +57,7 @@ WebSocket messages are versioned JSON envelopes (`{"v":1,"type":...,"payload":..
 | ADDR | :8080 | Listen address |
 | DATABASE_URL | *(empty)* | Postgres DSN; empty disables persistence |
 | GOOGLE_MAPS_API_KEY | *(empty)* | Google Maps API key for 360° Street View panoramas |
+| MAP_FILE | *(empty)* | Path to custom GeoJSON map pack (falls back to embedded world map) |
 | MAX_ROOM_SIZE | 8 | Players per room |
 | ROUNDS / ROUND_SECONDS / REVEAL_SECONDS | 5 / 60 / 10 | Match timing |
 | LOG_LEVEL / LOG_FORMAT | info / text | slog settings (`json` also supported) |
