@@ -78,8 +78,8 @@ func BenchmarkHaversine(b *testing.B) {
 	p1 := LatLng{48.8566, 2.3522}
 	p2 := LatLng{35.6762, 139.6503}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		_ = haversineMeters(p1, p2)
 	}
 }
@@ -88,8 +88,8 @@ func BenchmarkScore(b *testing.B) {
 	guess := LatLng{48.8566, 2.3522}
 	target := LatLng{48.8500, 2.3500}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		_ = Score(guess, target, 5000)
 	}
 }

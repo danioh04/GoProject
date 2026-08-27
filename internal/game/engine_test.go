@@ -456,9 +456,8 @@ func BenchmarkEngineFullMatch(b *testing.B) {
 	cfg.Rounds = 5
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		e := New(cfg, time.Now, pick)
 		e.Apply(JoinEvent{"p1", "alice"})
 		e.Apply(JoinEvent{"p2", "bob"})
