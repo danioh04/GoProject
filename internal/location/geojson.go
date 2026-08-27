@@ -22,9 +22,9 @@ type FeatureCollection struct {
 }
 
 type Feature struct {
-	Type       string                 `json:"type"`
-	Properties map[string]any         `json:"properties"`
-	Geometry   Geometry               `json:"geometry"`
+	Type       string         `json:"type"`
+	Properties map[string]any `json:"properties"`
+	Geometry   Geometry       `json:"geometry"`
 }
 
 type Geometry struct {

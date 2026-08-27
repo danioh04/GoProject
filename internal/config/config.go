@@ -74,6 +74,9 @@ func loadDotEnv(path string) {
 			os.Setenv(key, val)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return
+	}
 }
 
 func envOr(key, fallback string) string {
