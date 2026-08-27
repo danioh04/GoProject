@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"testing"
 
 	"geoduel/internal/config"
@@ -77,5 +78,41 @@ func TestLoadInvalidIntFallback(t *testing.T) {
 	}
 	if cfg.RoundSeconds != 60 {
 		t.Errorf("RoundSeconds = %d, want 60 (fallback for zero)", cfg.RoundSeconds)
+	}
+}
+
+func TestLoadDotEnvFeatures(t *testing.T) {
+	for _, k := range []string{"ADDR", "ROUNDS", "GOOGLE_MAPS_API_KEY"} {
+		t.Setenv(k, "")
+	}
+	// Test env file with comments, export prefix, and quoted values
+	tempFile := t.TempDir() + "/.env"
+	content := []byte(
+		"export ADDR=:9999 # custom port\n" +
+			"ROUNDS=7\t# total rounds\n" +
+			"GOOGLE_MAPS_API_KEY=\"AIza#KeyWithHash\"\n",
+	)
+	if err := os.WriteFile(tempFile, content, 0600); err != nil {
+		t.Fatalf("write temp env: %v", err)
+	}
+
+	// Read using the same logic as loadDotEnv by changing working dir or calling Load
+	// We can test os.Environ side effect after loading
+	prevWd, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err == nil {
+		defer os.Chdir(prevWd)
+		if err := os.WriteFile(".env", content, 0600); err != nil {
+			t.Fatalf("write .env: %v", err)
+		}
+		cfg := config.Load()
+		if cfg.Addr != ":9999" {
+			t.Errorf("Addr = %q, want :9999 (comment was not stripped)", cfg.Addr)
+		}
+		if cfg.Rounds != 7 {
+			t.Errorf("Rounds = %d, want 7", cfg.Rounds)
+		}
+		if cfg.GoogleMapsAPIKey != "AIza#KeyWithHash" {
+			t.Errorf("GoogleMapsAPIKey = %q, want AIza#KeyWithHash (quoted hash stripped)", cfg.GoogleMapsAPIKey)
+		}
 	}
 }

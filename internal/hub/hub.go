@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
+	mrand "math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -112,28 +113,18 @@ func (h *Hub) Shutdown(wait time.Duration) int {
 }
 
 func generateCode() string {
-	limit := 256 - 256%len(codeAlphabet)
 	var out [codeLen]byte
-	var buf [16]byte
-	bufIdx := len(buf)
-	for i := 0; i < codeLen; {
-		if bufIdx >= len(buf) {
-			rand.Read(buf[:])
-			bufIdx = 0
-		}
-		b := buf[bufIdx]
-		bufIdx++
-		if int(b) < limit {
-			out[i] = codeAlphabet[int(b)%len(codeAlphabet)]
-			i++
-		}
+	for i := range out {
+		out[i] = codeAlphabet[mrand.IntN(len(codeAlphabet))]
 	}
 	return string(out[:])
 }
 
 func generateID() string {
 	var b [idBytes]byte
-	rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		return time.Now().UTC().Format("20060102150405.000000000")[:24]
+	}
 	return hex.EncodeToString(b[:])
 }
 

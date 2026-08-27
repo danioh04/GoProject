@@ -338,12 +338,16 @@ func (r *Room) stopTimers() {
 }
 
 func (r *Room) publishClosed() {
+	hostNick := r.label
+	if prev := r.snapshot.Load(); prev != nil && prev.HostNickname != "" {
+		hostNick = prev.HostNickname
+	}
 	r.snapshot.Store(&Snapshot{
 		ID:           r.id,
 		JoinCode:     r.joinCode,
 		State:        PhaseClosed,
 		PlayerCount:  0,
-		HostNickname: r.label,
+		HostNickname: hostNick,
 	})
 }
 

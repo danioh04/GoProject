@@ -95,6 +95,9 @@ func TestSaveAndLoadGameRoundtrip(t *testing.T) {
 	if r1.LocationID != "paris" || r1.Target.Lat != 48.8566 || len(r1.Results) != 2 {
 		t.Errorf("round 1 wrong: %+v", r1)
 	}
+	if r1.Results[0].Nickname != "bob" || r1.Results[1].Nickname != "alice" {
+		t.Errorf("round 1 nicknames wrong: %q, %q", r1.Results[0].Nickname, r1.Results[1].Nickname)
+	}
 	if r1.Results[1].Guess != nil || r1.Results[1].Score != 0 {
 		t.Errorf("missing guess should load as null: %+v", r1.Results[1])
 	}

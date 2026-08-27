@@ -11,11 +11,11 @@ type Pool struct {
 	locations []game.Location
 }
 
-// New creates a location pool initialized with curated world locations.
-func New(locations ...[]game.Location) *Pool {
+// New creates a location pool initialized with curated world locations, or custom locations if provided.
+func New(locations ...game.Location) *Pool {
 	locs := WorldLocations
-	if len(locations) > 0 && locations[0] != nil {
-		locs = locations[0]
+	if len(locations) > 0 {
+		locs = locations
 	}
 	return &Pool{
 		locations: locs,

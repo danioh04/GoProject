@@ -148,6 +148,7 @@ func (s *Store) GameDetail(ctx context.Context, id string) (*GameDetail, error) 
 	if err != nil {
 		return nil, fmt.Errorf("load standings: %w", err)
 	}
+	nickByID := make(map[string]string)
 	for rows.Next() {
 		var row StandingRow
 		var pid string
@@ -156,6 +157,7 @@ func (s *Store) GameDetail(ctx context.Context, id string) (*GameDetail, error) 
 			return nil, fmt.Errorf("scan standing: %w", err)
 		}
 		row.PlayerID = pid
+		nickByID[pid] = row.Nickname
 		detail.Standings = append(detail.Standings, row)
 	}
 	rows.Close()
@@ -207,6 +209,7 @@ func (s *Store) GameDetail(ctx context.Context, id string) (*GameDetail, error) 
 		}
 		res := game.RoundResult{
 			PlayerID: game.PlayerID(pid),
+			Nickname: nickByID[pid],
 			Score:    score,
 		}
 		if lat != nil && lng != nil {

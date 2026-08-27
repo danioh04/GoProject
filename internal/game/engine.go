@@ -2,9 +2,10 @@
 package game
 
 import (
+	"cmp"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -116,11 +117,17 @@ func (e *Engine) applyLeave(ev LeaveEvent) []Action {
 }
 
 func (e *Engine) removePlayer(id PlayerID) {
-	delete(e.players, id)
 	for i, oid := range e.order {
 		if oid == id {
 			e.order = append(e.order[:i], e.order[i+1:]...)
 			break
+		}
+	}
+	if e.phase == PhaseLobby {
+		delete(e.players, id)
+		delete(e.totals, id)
+		for round := range e.guesses {
+			delete(e.guesses[round], id)
 		}
 	}
 	if remaining := e.order; len(remaining) > 0 && e.players[remaining[0]] != nil {
@@ -129,10 +136,6 @@ func (e *Engine) removePlayer(id PlayerID) {
 		}
 		e.players[remaining[0]].Host = true
 	}
-	for round := range e.guesses {
-		delete(e.guesses[round], id)
-	}
-	delete(e.totals, id)
 }
 
 func (e *Engine) applyStart(ev StartEvent) []Action {
@@ -274,7 +277,9 @@ func (e *Engine) sortedStandings() []Standing {
 			Total:    e.totals[id],
 		})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Total > out[j].Total })
+	slices.SortStableFunc(out, func(a, b Standing) int {
+		return cmp.Compare(b.Total, a.Total)
+	})
 	return out
 }
 
@@ -283,10 +288,10 @@ func sortResultsByScore(results []RoundResult, order []PlayerID) {
 	for i, id := range order {
 		rank[id] = i
 	}
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Score != results[j].Score {
-			return results[i].Score > results[j].Score
+	slices.SortStableFunc(results, func(a, b RoundResult) int {
+		if a.Score != b.Score {
+			return cmp.Compare(b.Score, a.Score)
 		}
-		return rank[results[i].PlayerID] < rank[results[j].PlayerID]
+		return cmp.Compare(rank[a.PlayerID], rank[b.PlayerID])
 	})
 }

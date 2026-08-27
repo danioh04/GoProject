@@ -17,7 +17,7 @@ func TestPoolInitialization(t *testing.T) {
 		{ID: "loc1", Lat: 10, Lng: 20},
 		{ID: "loc2", Lat: 30, Lng: 40},
 	}
-	customPool := New(custom)
+	customPool := New(custom...)
 	if customPool.Len() != 2 {
 		t.Errorf("custom pool len = %d, want 2", customPool.Len())
 	}

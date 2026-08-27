@@ -46,6 +46,8 @@ func loadDotEnv(path string) {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimPrefix(line, "export ")
+		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -55,7 +57,17 @@ func loadDotEnv(path string) {
 		}
 		key := strings.TrimSpace(parts[0])
 		val := strings.TrimSpace(parts[1])
-		val = strings.Trim(val, `"'`)
+
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		} else {
+			if idx := strings.Index(val, " #"); idx != -1 {
+				val = strings.TrimSpace(val[:idx])
+			} else if idx := strings.Index(val, "\t#"); idx != -1 {
+				val = strings.TrimSpace(val[:idx])
+			}
+		}
+
 		if os.Getenv(key) == "" {
 			os.Setenv(key, val)
 		}
