@@ -62,11 +62,10 @@ func (e *Engine) Phase() Phase     { return e.phase }
 func (e *Engine) Round() int       { return e.round }
 func (e *Engine) PlayerCount() int { return len(e.order) }
 
-func (e *Engine) Roster() []PlayerView {
-	out := make([]PlayerView, 0, len(e.order))
+func (e *Engine) Roster() []Player {
+	out := make([]Player, 0, len(e.order))
 	for _, id := range e.order {
-		p := e.players[id]
-		out = append(out, PlayerView{PlayerID: p.ID, Nickname: p.Nickname, IsHost: p.Host})
+		out = append(out, *e.players[id])
 	}
 	return out
 }
@@ -83,13 +82,13 @@ func (e *Engine) applyJoin(ev JoinEvent) []Action {
 		return reject(ev.PlayerID, "room full")
 	}
 	for _, id := range e.order {
-		if strings.EqualFold(string(e.players[id].Nickname), string(ev.Nickname)) {
+		if strings.EqualFold(e.players[id].Nickname, ev.Nickname) {
 			return reject(ev.PlayerID, "nickname already taken")
 		}
 	}
 
 	host := len(e.order) == 0
-	e.players[ev.PlayerID] = &Player{ID: ev.PlayerID, Nickname: ev.Nickname, Host: host}
+	e.players[ev.PlayerID] = &Player{PlayerID: ev.PlayerID, Nickname: ev.Nickname, IsHost: host}
 	e.order = append(e.order, ev.PlayerID)
 
 	return []Action{
@@ -127,9 +126,9 @@ func (e *Engine) removePlayer(id PlayerID) {
 	}
 	if remaining := e.order; len(remaining) > 0 && e.players[remaining[0]] != nil {
 		for _, pid := range remaining {
-			e.players[pid].Host = false
+			e.players[pid].IsHost = false
 		}
-		e.players[remaining[0]].Host = true
+		e.players[remaining[0]].IsHost = true
 	}
 }
 
@@ -138,7 +137,7 @@ func (e *Engine) applyStart(ev StartEvent) []Action {
 	switch {
 	case !ok:
 		return reject(ev.PlayerID, "unknown player")
-	case !p.Host:
+	case !p.IsHost:
 		return reject(ev.PlayerID, "only the host can start the match")
 	case e.phase != PhaseLobby:
 		return reject(ev.PlayerID, "match already started")
@@ -165,7 +164,7 @@ func (e *Engine) beginRound(round int) []Action {
 		RoundStartedAction{
 			Round:        round,
 			TotalRounds:  e.cfg.Rounds,
-			Location:     LocationRef{ID: loc.ID, PanoID: loc.PanoID},
+			PanoID:       loc.PanoID,
 			Deadline:     deadline,
 			RoundSeconds: int(math.Ceil(e.cfg.RoundTime.Seconds())),
 		},
@@ -203,7 +202,7 @@ func (e *Engine) maybeReveal() []Action {
 }
 
 func (e *Engine) revealNow() []Action {
-	target := e.locations[e.round-1].LatLng()
+	target := e.locations[e.round-1].LatLng
 	results := make([]RoundResult, 0, len(e.order))
 	for _, id := range e.order {
 		p := e.players[id]
@@ -222,7 +221,7 @@ func (e *Engine) revealNow() []Action {
 	resultsCopy := make([]RoundResult, len(results))
 	copy(resultsCopy, results)
 	e.roundsHistory = append(e.roundsHistory, FinishedRound{
-		Number:     e.round,
+		Round:      e.round,
 		LocationID: loc.ID,
 		Target:     target,
 		Results:    resultsCopy,

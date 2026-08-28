@@ -4,11 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"geoduel/internal/game"
 	"io"
 	mrand "math/rand/v2"
 	"os"
-
-	"geoduel/internal/game"
 )
 
 // GeoJSON RFC 7946 Structures

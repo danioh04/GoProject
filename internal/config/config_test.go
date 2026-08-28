@@ -1,10 +1,9 @@
 package config_test
 
 import (
+	"geoduel/internal/config"
 	"os"
 	"testing"
-
-	"geoduel/internal/config"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -92,7 +91,7 @@ func TestLoadDotEnvFeatures(t *testing.T) {
 			"ROUNDS=7\t# total rounds\n" +
 			"GOOGLE_MAPS_API_KEY=\"AIza#KeyWithHash\"\n",
 	)
-	if err := os.WriteFile(tempFile, content, 0600); err != nil {
+	if err := os.WriteFile(tempFile, content, 0o600); err != nil {
 		t.Fatalf("write temp env: %v", err)
 	}
 
@@ -101,7 +100,7 @@ func TestLoadDotEnvFeatures(t *testing.T) {
 	prevWd, _ := os.Getwd()
 	if err := os.Chdir(t.TempDir()); err == nil {
 		defer os.Chdir(prevWd)
-		if err := os.WriteFile(".env", content, 0600); err != nil {
+		if err := os.WriteFile(".env", content, 0o600); err != nil {
 			t.Fatalf("write .env: %v", err)
 		}
 		cfg := config.Load()

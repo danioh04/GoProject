@@ -2,12 +2,11 @@ package store
 
 import (
 	"context"
+	"geoduel/internal/game"
+	"geoduel/internal/room"
 	"os"
 	"testing"
 	"time"
-
-	"geoduel/internal/game"
-	"geoduel/internal/room"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -52,7 +51,7 @@ func TestSaveAndLoadGameRoundtrip(t *testing.T) {
 		},
 		Rounds: []room.FinishedRound{
 			{
-				Number:     1,
+				Round:      1,
 				LocationID: "paris",
 				Target:     game.LatLng{Lat: 48.8566, Lng: 2.3522},
 				Results: []game.RoundResult{
@@ -61,7 +60,7 @@ func TestSaveAndLoadGameRoundtrip(t *testing.T) {
 				},
 			},
 			{
-				Number:     2,
+				Round:      2,
 				LocationID: "tokyo",
 				Target:     game.LatLng{Lat: 35.6762, Lng: 139.6503},
 				Results: []game.RoundResult{
@@ -111,9 +110,9 @@ func TestHardestLocationsRanking(t *testing.T) {
 	ctx := context.Background()
 	cleanupGames(t, st, "itest-hard")
 
-	mk := func(id string, locID string, distances ...float64) room.FinishedGame {
+	mk := func(id, locID string, distances ...float64) room.FinishedGame {
 		fr := room.FinishedRound{
-			Number:     1,
+			Round:      1,
 			LocationID: locID,
 			Target:     game.LatLng{Lat: 0, Lng: 0},
 			Results:    []game.RoundResult{},

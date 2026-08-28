@@ -1,0 +1,73 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+    - gofumpt
+    - misspell
+    - unconvert
+    - bodyclose
+    - errorlint
+    - nilerr
+    - contextcheck
+    - gosec
+
+linters-settings:
+  errcheck:
+    exclude-functions:
+      - (*net/http.Response).Body.Close
+      - (*os.File).Close
+      - (io.Closer).Close
+      - (github.com/jackc/pgx/v5.Tx).Rollback
+      - (*github.com/jackc/pgx/v5.BatchResults).Close
+      - (github.com/coder/websocket.Conn).Close
+      - (github.com/coder/websocket.Conn).CloseNow
+      - (*github.com/coder/websocket.Conn).Close
+      - (*github.com/coder/websocket.Conn).CloseNow
+      - os.Setenv
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - whyNoLint
+      - hugeParam
+      - exitAfterDefer
+  gofumpt:
+    extra-rules: true
+  gosec:
+    excludes:
+      - G404 # Insecure random number source (used intentionally for procedural sampling, crypto/rand used for IDs)
+      - G304 # File path provided as taint input in CLI/tests
+      - G108 # Profiling endpoint registered for dedicated debug port
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gocritic
+        - bodyclose
+        - gosec
+        - errorlint
+        - contextcheck
+    - path: cmd/server/main\.go
+      linters:
+        - contextcheck
+    - path: internal/api/api\.go
+      linters:
+        - contextcheck

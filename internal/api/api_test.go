@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"geoduel/internal/hub"
+	"geoduel/internal/room"
+	"geoduel/internal/store"
+	"geoduel/internal/wsutil"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,11 +17,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-
-	"geoduel/internal/hub"
-	"geoduel/internal/room"
-	"geoduel/internal/store"
-	"geoduel/internal/wsutil"
 )
 
 type roomSnapshot struct {
@@ -66,7 +65,7 @@ func TestRecoverPanicsReturns500(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
@@ -82,7 +81,7 @@ func TestRequestIDsMiddlewareSetsHeaderAndContext(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
 	handler.ServeHTTP(rec, req)
 
 	headerID := rec.Header().Get("X-Request-ID")
@@ -104,7 +103,7 @@ func TestLogRequestsPreservesStatusCode(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/status", http.NoBody)
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTeapot {

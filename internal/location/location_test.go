@@ -3,14 +3,13 @@ package location
 import (
 	"context"
 	"encoding/json"
+	"geoduel/internal/game"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-
-	"geoduel/internal/game"
 )
 
 func TestPointInPolygonRayCasting(t *testing.T) {
@@ -149,7 +148,7 @@ func TestLoadMapFile(t *testing.T) {
 			}
 		]
 	}`
-	if err := os.WriteFile(mapPath, []byte(sampleJSON), 0644); err != nil {
+	if err := os.WriteFile(mapPath, []byte(sampleJSON), 0o644); err != nil {
 		t.Fatalf("write temp map: %v", err)
 	}
 
@@ -180,8 +179,8 @@ func TestSimulatedPoolOffline(t *testing.T) {
 			t.Errorf("duplicate location ID returned: %s", loc.ID)
 		}
 		seen[loc.ID] = struct{}{}
-		if !loc.LatLng().Valid() {
-			t.Errorf("invalid coordinate: %+v", loc.LatLng())
+		if !loc.Valid() {
+			t.Errorf("invalid coordinate: %+v", loc.LatLng)
 		}
 		if loc.PanoID == "" {
 			t.Error("pano_id should not be empty")

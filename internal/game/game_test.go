@@ -16,11 +16,11 @@ func (c *fakeClock) advance(d time.Duration) {
 
 func testLocations() []Location {
 	return []Location{
-		{ID: "paris", Lat: 48.8566, Lng: 2.3522},
-		{ID: "tokyo", Lat: 35.6762, Lng: 139.6503},
-		{ID: "sydney", Lat: -33.8688, Lng: 151.2093},
-		{ID: "cairo", Lat: 30.0444, Lng: 31.2357},
-		{ID: "lima", Lat: -12.0464, Lng: -77.0428},
+		{ID: "paris", PanoID: "paris_pano", LatLng: LatLng{Lat: 48.8566, Lng: 2.3522}},
+		{ID: "tokyo", PanoID: "tokyo_pano", LatLng: LatLng{Lat: 35.6762, Lng: 139.6503}},
+		{ID: "sydney", PanoID: "sydney_pano", LatLng: LatLng{Lat: -33.8688, Lng: 151.2093}},
+		{ID: "cairo", PanoID: "cairo_pano", LatLng: LatLng{Lat: 30.0444, Lng: 31.2357}},
+		{ID: "lima", PanoID: "lima_pano", LatLng: LatLng{Lat: -12.0464, Lng: -77.0428}},
 	}
 }
 
@@ -149,8 +149,12 @@ func TestLatLngValidation(t *testing.T) {
 		}
 	}
 	invalid := []LatLng{
-		{91, 0}, {-90.0001, 0}, {0, 181}, {0, -180.0001},
-		{math.NaN(), 0}, {0, math.Inf(1)},
+		{91, 0},
+		{-90.0001, 0},
+		{0, 181},
+		{0, -180.0001},
+		{math.NaN(), 0},
+		{0, math.Inf(1)},
 	}
 	for _, p := range invalid {
 		if p.Valid() {
@@ -227,7 +231,7 @@ func TestFullMatchLifecycle(t *testing.T) {
 		t.Fatalf("no MatchStarted: %+v", startActs)
 	}
 	rs, ok := actionOfType[RoundStartedAction](startActs)
-	if !ok || rs.Round != 1 || rs.Location.ID != "paris" || rs.RoundSeconds != 60 {
+	if !ok || rs.Round != 1 || rs.PanoID != "paris_pano" || rs.RoundSeconds != 60 {
 		t.Fatalf("round 1 start wrong: %+v", rs)
 	}
 	timer, _ := actionOfType[TimerScheduledAction](startActs)
@@ -250,7 +254,7 @@ func TestFullMatchLifecycle(t *testing.T) {
 	}
 
 	for round := 1; round <= 3; round++ {
-		target := testLocations()[round-1].LatLng()
+		target := testLocations()[round-1].LatLng
 		gA, gB := guesses[round-1].near, guesses[round-1].far
 
 		actsA := e.Apply(GuessEvent{"a", gA})

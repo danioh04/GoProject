@@ -4,14 +4,13 @@ package hub
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"geoduel/internal/metrics"
+	"geoduel/internal/room"
 	"log/slog"
 	mrand "math/rand/v2"
 	"strings"
 	"sync"
 	"time"
-
-	"geoduel/internal/metrics"
-	"geoduel/internal/room"
 )
 
 const (

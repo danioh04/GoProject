@@ -5,6 +5,13 @@ import (
 	"errors"
 	_ "expvar"
 	"fmt"
+	"geoduel/internal/api"
+	"geoduel/internal/config"
+	"geoduel/internal/game"
+	"geoduel/internal/hub"
+	"geoduel/internal/location"
+	"geoduel/internal/room"
+	"geoduel/internal/store"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,14 +20,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"geoduel/internal/api"
-	"geoduel/internal/config"
-	"geoduel/internal/game"
-	"geoduel/internal/hub"
-	"geoduel/internal/location"
-	"geoduel/internal/room"
-	"geoduel/internal/store"
 )
 
 func main() {
@@ -58,7 +57,7 @@ func run(ctx context.Context) error {
 	var pgStore *store.Store
 	var persistence api.Persistence
 	if cfg.DatabaseURL != "" {
-		bootCtx, cancelBoot := context.WithTimeout(context.Background(), 10*time.Second)
+		bootCtx, cancelBoot := context.WithTimeout(ctx, 10*time.Second)
 		var err error
 		pgStore, err = store.Open(bootCtx, cfg.DatabaseURL)
 		cancelBoot()

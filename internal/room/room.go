@@ -8,14 +8,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"geoduel/internal/game"
+	"geoduel/internal/metrics"
+	"geoduel/internal/wsutil"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"geoduel/internal/game"
-	"geoduel/internal/metrics"
-	"geoduel/internal/wsutil"
 )
 
 const (
@@ -249,7 +248,7 @@ func (r *Room) execute(acts []game.Action) {
 			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundStart, roundStartPayload{
 				Round:        act.Round,
 				TotalRounds:  act.TotalRounds,
-				PanoID:       act.Location.PanoID,
+				PanoID:       act.PanoID,
 				DeadlineUnix: act.Deadline.Unix(),
 				Seconds:      act.RoundSeconds,
 			})
@@ -451,7 +450,7 @@ type joinedPayload struct {
 }
 
 type rosterPayload struct {
-	Players []game.PlayerView `json:"players"`
+	Players []game.Player `json:"players"`
 }
 
 type roundStartPayload struct {

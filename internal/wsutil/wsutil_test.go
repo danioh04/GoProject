@@ -3,14 +3,13 @@ package wsutil_test
 import (
 	"context"
 	"encoding/json"
+	"geoduel/internal/wsutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
-
-	"geoduel/internal/wsutil"
 )
 
 func startRawServer(t *testing.T, afterAccept func(conn wsutil.Conn)) *websocket.Conn {
@@ -45,7 +44,7 @@ func startRawServer(t *testing.T, afterAccept func(conn wsutil.Conn)) *websocket
 
 func TestSendOverflowBeforeAnyDrain(t *testing.T) {
 	var session *wsutil.Session
-	var ready = make(chan struct{})
+	ready := make(chan struct{})
 	client := startRawServer(t, func(conn wsutil.Conn) {
 		session = wsutil.NewSession(conn, wsutil.SessionConfig{SendBuffer: 4})
 		close(ready)

@@ -3,6 +3,9 @@ package room_test
 import (
 	"context"
 	"encoding/json"
+	"geoduel/internal/game"
+	"geoduel/internal/room"
+	"geoduel/internal/wsutil"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,10 +17,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-
-	"geoduel/internal/game"
-	"geoduel/internal/room"
-	"geoduel/internal/wsutil"
 )
 
 // -----------------------------------------------------------------------------
@@ -30,8 +29,8 @@ func testLogger() *slog.Logger {
 
 func matchLocations() []game.Location {
 	return []game.Location{
-		{ID: "paris", Lat: 48.8566, Lng: 2.3522, PanoID: "0oU9oWv065S_VzV-H1G4kg"},
-		{ID: "tokyo", Lat: 35.6762, Lng: 139.6503, PanoID: "bYjJc805_n1a2gC4K4j3pQ"},
+		{ID: "paris", PanoID: "0oU9oWv065S_VzV-H1G4kg", LatLng: game.LatLng{Lat: 48.8566, Lng: 2.3522}},
+		{ID: "tokyo", PanoID: "bYjJc805_n1a2gC4K4j3pQ", LatLng: game.LatLng{Lat: 35.6762, Lng: 139.6503}},
 	}
 }
 
@@ -342,7 +341,7 @@ func TestAttachRosterAndIdentity(t *testing.T) {
 		t.Fatalf("bob second message = %q, want roster", rosterB.Type)
 	}
 	var players struct {
-		Players []game.PlayerView `json:"players"`
+		Players []game.Player `json:"players"`
 	}
 	if err := json.Unmarshal(rosterB.Payload, &players); err != nil {
 		t.Fatalf("decode roster: %v", err)
@@ -443,7 +442,7 @@ func TestHostPromotionOnHostLeave(t *testing.T) {
 		t.Fatalf("post-leave message = %q, want roster", roster.Type)
 	}
 	var players struct {
-		Players []game.PlayerView `json:"players"`
+		Players []game.Player `json:"players"`
 	}
 	if err := json.Unmarshal(roster.Payload, &players); err != nil {
 		t.Fatalf("decode roster: %v", err)
@@ -656,7 +655,7 @@ func TestMatchIsPersistedOnGameOver(t *testing.T) {
 	totalGuesses := 0
 	for _, rnd := range saved.Rounds {
 		if len(rnd.Results) != 2 {
-			t.Errorf("round %d results = %d, want 2", rnd.Number, len(rnd.Results))
+			t.Errorf("round %d results = %d, want 2", rnd.Round, len(rnd.Results))
 		}
 		for _, res := range rnd.Results {
 			if res.Guess != nil {

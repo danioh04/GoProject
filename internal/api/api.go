@@ -8,6 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"geoduel/internal/hub"
+	"geoduel/internal/metrics"
+	"geoduel/internal/store"
+	"geoduel/internal/wsutil"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,11 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"geoduel/internal/hub"
-	"geoduel/internal/metrics"
-	"geoduel/internal/store"
-	"geoduel/internal/wsutil"
 )
 
 const maxNicknameLen = 24

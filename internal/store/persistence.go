@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"geoduel/internal/game"
+	"geoduel/internal/room"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
-	"geoduel/internal/game"
-	"geoduel/internal/room"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -27,19 +26,12 @@ type StandingRow struct {
 	Placement  int    `json:"placement"`
 }
 
-type RoundDetail struct {
-	Round      int                `json:"round"`
-	LocationID string             `json:"location_id"`
-	Target     game.LatLng        `json:"target"`
-	Results    []game.RoundResult `json:"results"`
-}
-
 type GameDetail struct {
-	ID          string        `json:"id"`
-	CreatedAt   time.Time     `json:"created_at"`
-	TotalRounds int           `json:"total_rounds"`
-	Standings   []StandingRow `json:"standings"`
-	Rounds      []RoundDetail `json:"rounds"`
+	ID          string               `json:"id"`
+	CreatedAt   time.Time            `json:"created_at"`
+	TotalRounds int                  `json:"total_rounds"`
+	Standings   []StandingRow        `json:"standings"`
+	Rounds      []game.FinishedRound `json:"rounds"`
 }
 
 func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
@@ -68,7 +60,7 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 		batch.Queue(
 			`INSERT INTO rounds (game_id, round, location_id, target_lat, target_lng)
 			 VALUES ($1, $2, $3, $4, $5)`,
-			g.ID, rnd.Number, rnd.LocationID, rnd.Target.Lat, rnd.Target.Lng,
+			g.ID, rnd.Round, rnd.LocationID, rnd.Target.Lat, rnd.Target.Lng,
 		)
 	}
 
@@ -82,7 +74,7 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 			batch.Queue(
 				`INSERT INTO guesses (game_id, round, player_id, lat, lng, distance_m, score)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-				g.ID, rnd.Number, string(res.PlayerID), lat, lng, dist, res.Score,
+				g.ID, rnd.Round, string(res.PlayerID), lat, lng, dist, res.Score,
 			)
 		}
 	}
@@ -129,7 +121,7 @@ func (s *Store) HardestLocations(ctx context.Context, limit int) ([]LocationStat
 }
 
 func (s *Store) GameDetail(ctx context.Context, id string) (*GameDetail, error) {
-	detail := &GameDetail{Standings: []StandingRow{}, Rounds: []RoundDetail{}}
+	detail := &GameDetail{Standings: []StandingRow{}, Rounds: []game.FinishedRound{}}
 
 	err := s.pool.QueryRow(ctx,
 		`SELECT created_at, total_rounds FROM games WHERE id = $1`, id).
@@ -175,7 +167,7 @@ func (s *Store) GameDetail(ctx context.Context, id string) (*GameDetail, error) 
 
 	indexByRound := map[int]int{}
 	for roundRows.Next() {
-		var rd RoundDetail
+		var rd game.FinishedRound
 		if err := roundRows.Scan(&rd.Round, &rd.LocationID, &rd.Target.Lat, &rd.Target.Lng); err != nil {
 			return nil, fmt.Errorf("scan round: %w", err)
 		}

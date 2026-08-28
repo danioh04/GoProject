@@ -6,6 +6,12 @@ import (
 
 type PlayerID string
 
+type Player struct {
+	PlayerID PlayerID `json:"player_id"`
+	Nickname string   `json:"nickname"`
+	IsHost   bool     `json:"is_host"`
+}
+
 type Phase string
 
 const (
@@ -37,31 +43,9 @@ func (p LatLng) Valid() bool {
 }
 
 type Location struct {
-	ID     string  `json:"id"`
-	PanoID string  `json:"pano_id"`
-	Lat    float64 `json:"lat"`
-	Lng    float64 `json:"lng"`
-}
-
-func (l Location) LatLng() LatLng {
-	return LatLng{Lat: l.Lat, Lng: l.Lng}
-}
-
-type Player struct {
-	ID       PlayerID
-	Nickname string
-	Host     bool
-}
-
-type PlayerView struct {
-	PlayerID PlayerID `json:"player_id"`
-	Nickname string   `json:"nickname"`
-	IsHost   bool     `json:"is_host"`
-}
-
-type LocationRef struct {
 	ID     string `json:"id"`
 	PanoID string `json:"pano_id"`
+	LatLng
 }
 
 type RoundResult struct {
@@ -174,7 +158,7 @@ type MatchStartedAction struct {
 type RoundStartedAction struct {
 	Round        int
 	TotalRounds  int
-	Location     LocationRef
+	PanoID       string
 	Deadline     time.Time
 	RoundSeconds int
 }
@@ -191,7 +175,7 @@ type RoundRevealedAction struct {
 }
 
 type FinishedRound struct {
-	Number     int           `json:"number"`
+	Round      int           `json:"round"`
 	LocationID string        `json:"location_id"`
 	Target     LatLng        `json:"target"`
 	Results    []RoundResult `json:"results"`

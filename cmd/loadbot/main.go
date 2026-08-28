@@ -195,7 +195,7 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 			TotalRounds int    `json:"total_rounds"`
 			PanoID      string `json:"pano_id"`
 		}
-		json.Unmarshal(rs.Payload, &p)
+		_ = json.Unmarshal(rs.Payload, &p)
 
 		if verbose {
 			fmt.Printf("\n  ┌─ [Round %d/%d] Panorama: %s\n", p.Round, p.TotalRounds, p.PanoID)
@@ -234,7 +234,7 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 					Score     int     `json:"score"`
 				} `json:"results"`
 			}
-			json.Unmarshal(lastResult.Payload, &rr)
+			_ = json.Unmarshal(lastResult.Payload, &rr)
 			fmt.Printf("  └─ [Round %d Reveal] Target: (%.4f, %.4f)\n",
 				p.Round, rr.Target.Lat, rr.Target.Lng)
 			for _, res := range rr.Results {
@@ -256,7 +256,7 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 				Total    int    `json:"total"`
 			} `json:"standings"`
 		}
-		json.Unmarshal(lastEnd.Payload, &goPayload)
+		_ = json.Unmarshal(lastEnd.Payload, &goPayload)
 		fmt.Printf("\n[Room %s] 🏆 Final Standings:\n", code)
 		for rank, s := range goPayload.Standings {
 			winnerBadge := ""
@@ -293,8 +293,11 @@ func createRoom(addr, nickname string) (string, error) {
 func join(addr, code, name string) (*bot, error) {
 	ctx, cancel := requestCtx()
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx,
+	conn, resp, err := websocket.Dial(ctx,
 		fmt.Sprintf("ws://%s/v1/ws?code=%s&name=%s", addr, code, name), nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +312,7 @@ func join(addr, code, name string) (*bot, error) {
 	var p struct {
 		Host bool `json:"host"`
 	}
-	json.Unmarshal(joined.Payload, &p)
+	_ = json.Unmarshal(joined.Payload, &p)
 	b.isHost = p.Host
 	return b, nil
 }

@@ -1,12 +1,11 @@
 package hub
 
 import (
+	"geoduel/internal/room"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
-
-	"geoduel/internal/room"
 )
 
 func testLogger() *slog.Logger {

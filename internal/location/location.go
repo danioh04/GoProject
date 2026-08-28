@@ -6,14 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"geoduel/internal/game"
 	"log/slog"
 	mrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
-
-	"geoduel/internal/game"
 )
 
 const (
@@ -187,7 +186,7 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 	reqURL := fmt.Sprintf("%s?location=%.6f,%.6f&radius=%d&key=%s",
 		p.endpoint, coord.Lat, coord.Lng, p.radius, url.QueryEscape(p.apiKey))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
 		return game.Location{}, err
 	}
@@ -214,8 +213,7 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 	return game.Location{
 		ID:     meta.PanoID,
 		PanoID: meta.PanoID,
-		Lat:    meta.Location.Lat,
-		Lng:    meta.Location.Lng,
+		LatLng: game.LatLng{Lat: meta.Location.Lat, Lng: meta.Location.Lng},
 	}, nil
 }
 
@@ -231,7 +229,7 @@ func (p *Pool) Pick(n int) []game.Location {
 	for len(out) < n {
 		select {
 		case loc := <-p.buffer:
-			if _, exists := seen[loc.ID]; !exists && loc.LatLng().Valid() {
+			if _, exists := seen[loc.ID]; !exists && loc.Valid() {
 				seen[loc.ID] = struct{}{}
 				out = append(out, loc)
 			}
@@ -296,7 +294,6 @@ func simulatedLocation(coord game.LatLng) game.Location {
 	return game.Location{
 		ID:     panoID,
 		PanoID: panoID,
-		Lat:    coord.Lat,
-		Lng:    coord.Lng,
+		LatLng: coord,
 	}
 }
