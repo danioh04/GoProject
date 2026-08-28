@@ -23,7 +23,6 @@ func TestPointInPolygonRayCasting(t *testing.T) {
 	}
 
 	poly := Polygon{
-		Name:     "Square",
 		Exterior: exterior,
 		MinLat:   0,
 		MaxLat:   10,
@@ -47,7 +46,6 @@ func TestPointInPolygonRayCasting(t *testing.T) {
 
 func TestPolygonWithHole(t *testing.T) {
 	poly := Polygon{
-		Name: "Donut",
 		Exterior: Ring{
 			{Lat: 0, Lng: 0},
 			{Lat: 0, Lng: 10},
@@ -113,23 +111,17 @@ func TestGeoJSONParsing(t *testing.T) {
 		t.Fatalf("expected 2 polygons, got %d", len(m.Polygons))
 	}
 
-	coord, name := m.Sample(nil)
+	coord := m.Sample(nil)
 	if !coord.Valid() {
 		t.Fatalf("invalid sampled coordinate: %+v", coord)
-	}
-	if name == "" {
-		t.Error("expected non-empty region name")
 	}
 }
 
 func TestProceduralCoordinateFallback(t *testing.T) {
 	for i := 0; i < 50; i++ {
-		coord, region := ProceduralCoordinate(nil)
+		coord := ProceduralCoordinate(nil)
 		if !coord.Valid() {
 			t.Fatalf("invalid procedural coordinate: %+v", coord)
-		}
-		if region != "Procedural Global" {
-			t.Errorf("unexpected region: %s", region)
 		}
 	}
 }

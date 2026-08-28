@@ -18,9 +18,8 @@ type FeatureCollection struct {
 }
 
 type Feature struct {
-	Type       string         `json:"type"`
-	Properties map[string]any `json:"properties"`
-	Geometry   Geometry       `json:"geometry"`
+	Type     string   `json:"type"`
+	Geometry Geometry `json:"geometry"`
 }
 
 type Geometry struct {
@@ -31,7 +30,6 @@ type Geometry struct {
 type Ring []game.LatLng
 
 type Polygon struct {
-	Name     string
 	Exterior Ring
 	Holes    []Ring
 	MinLat   float64
@@ -89,18 +87,13 @@ func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
 	out := &Map{Polygons: make([]Polygon, 0, len(fc.Features))}
 
 	for _, feat := range fc.Features {
-		name := "Custom Region"
-		if n, ok := feat.Properties["name"].(string); ok && n != "" {
-			name = n
-		}
-
 		switch feat.Geometry.Type {
 		case "Polygon":
 			var raw [][][]float64
 			if err := json.Unmarshal(feat.Geometry.Coordinates, &raw); err != nil {
 				continue
 			}
-			poly, ok := parsePolygon(name, raw)
+			poly, ok := parsePolygon(raw)
 			if ok {
 				out.Polygons = append(out.Polygons, poly)
 			}
@@ -111,7 +104,7 @@ func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
 				continue
 			}
 			for _, polyRaw := range raw {
-				poly, ok := parsePolygon(name, polyRaw)
+				poly, ok := parsePolygon(polyRaw)
 				if ok {
 					out.Polygons = append(out.Polygons, poly)
 				}
@@ -131,7 +124,7 @@ func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
 				{Lat: lat - 0.05, Lng: lng + 0.05},
 				{Lat: lat - 0.05, Lng: lng - 0.05},
 			}
-			poly, ok := parsePolygon(name, [][][]float64{ringToFloats(ring)})
+			poly, ok := parsePolygon([][][]float64{ringToFloats(ring)})
 			if ok {
 				out.Polygons = append(out.Polygons, poly)
 			}
@@ -145,7 +138,7 @@ func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
 	return out, nil
 }
 
-func parsePolygon(name string, ringsRaw [][][]float64) (Polygon, bool) {
+func parsePolygon(ringsRaw [][][]float64) (Polygon, bool) {
 	if len(ringsRaw) == 0 || len(ringsRaw[0]) < 3 {
 		return Polygon{}, false
 	}
@@ -182,7 +175,6 @@ func parsePolygon(name string, ringsRaw [][][]float64) (Polygon, bool) {
 	}
 
 	return Polygon{
-		Name:     name,
 		Exterior: exterior,
 		Holes:    holes,
 		MinLat:   minLat,
@@ -213,7 +205,7 @@ func ringToFloats(ring Ring) [][]float64 {
 }
 
 // Sample generates a random valid coordinate within the map's boundary polygons using Ray-Casting PIP.
-func (m *Map) Sample(rnd *mrand.Rand) (game.LatLng, string) {
+func (m *Map) Sample(rnd *mrand.Rand) game.LatLng {
 	if len(m.Polygons) == 0 {
 		return ProceduralCoordinate(rnd)
 	}
@@ -241,16 +233,16 @@ func (m *Map) Sample(rnd *mrand.Rand) (game.LatLng, string) {
 
 		candidate := game.LatLng{Lat: rLat, Lng: rLng}
 		if poly.Contains(candidate) {
-			return candidate, poly.Name
+			return candidate
 		}
 	}
 
 	// Fallback to polygon centroid if rejection sampling timed out
-	return poly.Centroid(), poly.Name
+	return poly.Centroid()
 }
 
 // ProceduralCoordinate generates a completely dynamic, non-hardcoded global coordinate.
-func ProceduralCoordinate(rnd *mrand.Rand) (game.LatLng, string) {
+func ProceduralCoordinate(rnd *mrand.Rand) game.LatLng {
 	// Sample across inhabited global land latitudes (-50 to +65) and longitudes (-180 to +180)
 	var lat, lng float64
 	if rnd != nil {
@@ -261,7 +253,7 @@ func ProceduralCoordinate(rnd *mrand.Rand) (game.LatLng, string) {
 		lng = -180.0 + mrand.Float64()*360.0
 	}
 
-	return game.LatLng{Lat: lat, Lng: lng}, "Procedural Global"
+	return game.LatLng{Lat: lat, Lng: lng}
 }
 
 // Contains checks if point is inside exterior ring and outside all interior holes (Ray-Casting Algorithm).

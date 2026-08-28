@@ -169,12 +169,10 @@ func (p *Pool) workerLoop() {
 
 func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 	var coord game.LatLng
-	var regionName string
-
 	if p.geoMap != nil {
-		coord, regionName = p.geoMap.Sample(nil)
+		coord = p.geoMap.Sample(nil)
 	} else {
-		coord, regionName = ProceduralCoordinate(nil)
+		coord = ProceduralCoordinate(nil)
 	}
 
 	if !coord.Valid() {
@@ -183,7 +181,7 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 
 	// If no API key is provided, run in simulated offline discovery mode
 	if p.apiKey == "" {
-		return simulatedLocation(coord, regionName), nil
+		return simulatedLocation(coord), nil
 	}
 
 	reqURL := fmt.Sprintf("%s?location=%.6f,%.6f&radius=%d&key=%s",
@@ -218,7 +216,6 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 		PanoID: meta.PanoID,
 		Lat:    meta.Location.Lat,
 		Lng:    meta.Location.Lng,
-		Title:  regionName,
 	}, nil
 }
 
@@ -241,13 +238,12 @@ func (p *Pool) Pick(n int) []game.Location {
 		case <-time.After(150 * time.Millisecond):
 			// If buffer is drained, sample directly
 			var coord game.LatLng
-			var region string
 			if p.geoMap != nil {
-				coord, region = p.geoMap.Sample(nil)
+				coord = p.geoMap.Sample(nil)
 			} else {
-				coord, region = ProceduralCoordinate(nil)
+				coord = ProceduralCoordinate(nil)
 			}
-			fallback := simulatedLocation(coord, region)
+			fallback := simulatedLocation(coord)
 			if _, exists := seen[fallback.ID]; !exists {
 				seen[fallback.ID] = struct{}{}
 				out = append(out, fallback)
@@ -292,7 +288,7 @@ func (p *Pool) Close() {
 	p.wg.Wait()
 }
 
-func simulatedLocation(coord game.LatLng, regionName string) game.Location {
+func simulatedLocation(coord game.LatLng) game.Location {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	panoID := "sim_" + hex.EncodeToString(b[:])
@@ -302,6 +298,5 @@ func simulatedLocation(coord game.LatLng, regionName string) game.Location {
 		PanoID: panoID,
 		Lat:    coord.Lat,
 		Lng:    coord.Lng,
-		Title:  regionName,
 	}
 }

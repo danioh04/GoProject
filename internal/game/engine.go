@@ -20,14 +20,9 @@ type Engine struct {
 	order         []PlayerID
 	round         int
 	locations     []Location
-	guesses       map[int]map[PlayerID]GuessRecord
+	guesses       map[int]map[PlayerID]LatLng
 	totals        map[PlayerID]int
 	roundsHistory []FinishedRound
-}
-
-type GuessRecord struct {
-	Guess LatLng
-	At    time.Time
 }
 
 func New(cfg Config, now func() time.Time, pick func(n int) []Location) *Engine {
@@ -40,7 +35,7 @@ func New(cfg Config, now func() time.Time, pick func(n int) []Location) *Engine 
 		pick:          pick,
 		phase:         PhaseLobby,
 		players:       make(map[PlayerID]*Player),
-		guesses:       make(map[int]map[PlayerID]GuessRecord),
+		guesses:       make(map[int]map[PlayerID]LatLng),
 		totals:        make(map[PlayerID]int),
 		roundsHistory: make([]FinishedRound, 0, cfg.Rounds),
 	}
@@ -161,7 +156,7 @@ func (e *Engine) applyStart(ev StartEvent) []Action {
 func (e *Engine) beginRound(round int) []Action {
 	e.round = round
 	e.phase = PhasePlaying
-	e.guesses[round] = make(map[PlayerID]GuessRecord)
+	e.guesses[round] = make(map[PlayerID]LatLng)
 
 	loc := e.locations[round-1]
 	deadline := e.now().Add(e.cfg.RoundTime)
@@ -189,7 +184,7 @@ func (e *Engine) applyGuess(ev GuessEvent) []Action {
 		return reject(ev.PlayerID, "invalid coordinates")
 	}
 
-	e.guesses[e.round][ev.PlayerID] = GuessRecord{Guess: ev.Guess, At: e.now()}
+	e.guesses[e.round][ev.PlayerID] = ev.Guess
 
 	actions := []Action{GuessAcceptedAction{PlayerID: ev.PlayerID, Round: e.round}}
 	return append(actions, e.maybeReveal()...)
@@ -213,8 +208,7 @@ func (e *Engine) revealNow() []Action {
 	for _, id := range e.order {
 		p := e.players[id]
 		res := RoundResult{PlayerID: id, Nickname: p.Nickname, Score: 0}
-		if rec, ok := e.guesses[e.round][id]; ok {
-			g := rec.Guess
+		if g, ok := e.guesses[e.round][id]; ok {
 			res.Guess = &g
 			res.DistanceM = haversineMeters(g, target)
 			res.Score = Score(g, target, e.cfg.MaxScore)

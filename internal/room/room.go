@@ -457,7 +457,7 @@ type rosterPayload struct {
 type roundStartPayload struct {
 	Round        int    `json:"round"`
 	TotalRounds  int    `json:"total_rounds"`
-	PanoID       string `json:"pano_id,omitempty"`
+	PanoID       string `json:"pano_id"`
 	DeadlineUnix int64  `json:"deadline_unix"`
 	Seconds      int    `json:"seconds"`
 }

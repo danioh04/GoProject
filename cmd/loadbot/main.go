@@ -225,9 +225,8 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 		if verbose {
 			var rr struct {
 				Target struct {
-					Lat   float64 `json:"lat"`
-					Lng   float64 `json:"lng"`
-					Title string  `json:"title"`
+					Lat float64 `json:"lat"`
+					Lng float64 `json:"lng"`
 				} `json:"target"`
 				Results []struct {
 					Nickname  string  `json:"nickname"`
@@ -236,12 +235,8 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 				} `json:"results"`
 			}
 			json.Unmarshal(lastResult.Payload, &rr)
-			title := ""
-			if rr.Target.Title != "" {
-				title = fmt.Sprintf("(%s)", rr.Target.Title)
-			}
-			fmt.Printf("  └─ [Round %d Reveal] Target: (%.4f, %.4f) %s\n",
-				p.Round, rr.Target.Lat, rr.Target.Lng, title)
+			fmt.Printf("  └─ [Round %d Reveal] Target: (%.4f, %.4f)\n",
+				p.Round, rr.Target.Lat, rr.Target.Lng)
 			for _, res := range rr.Results {
 				fmt.Printf("       ★ %-10s: %5d pts (dist: %8.1f km)\n",
 					res.Nickname, res.Score, res.DistanceM/1000.0)

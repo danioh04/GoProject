@@ -1,7 +1,6 @@
 package game
 
 import (
-	"math"
 	"time"
 )
 
@@ -34,18 +33,14 @@ type LatLng struct {
 }
 
 func (p LatLng) Valid() bool {
-	return !math.IsNaN(p.Lat) && !math.IsNaN(p.Lng) &&
-		!math.IsInf(p.Lat, 0) && !math.IsInf(p.Lng, 0) &&
-		p.Lat >= -90 && p.Lat <= 90 &&
-		p.Lng >= -180 && p.Lng <= 180
+	return p.Lat >= -90 && p.Lat <= 90 && p.Lng >= -180 && p.Lng <= 180
 }
 
 type Location struct {
 	ID     string  `json:"id"`
-	PanoID string  `json:"pano_id,omitempty"`
+	PanoID string  `json:"pano_id"`
 	Lat    float64 `json:"lat"`
 	Lng    float64 `json:"lng"`
-	Title  string  `json:"title,omitempty"`
 }
 
 func (l Location) LatLng() LatLng {
@@ -66,14 +61,14 @@ type PlayerView struct {
 
 type LocationRef struct {
 	ID     string `json:"id"`
-	PanoID string `json:"pano_id,omitempty"`
+	PanoID string `json:"pano_id"`
 }
 
 type RoundResult struct {
 	PlayerID  PlayerID `json:"player_id"`
 	Nickname  string   `json:"nickname"`
 	Guess     *LatLng  `json:"guess,omitempty"`
-	DistanceM float64  `json:"distance_m,omitempty"`
+	DistanceM float64  `json:"distance_m"`
 	Score     int      `json:"score"`
 }
 
