@@ -18,7 +18,7 @@ go run ./cmd/server      # set DATABASE_URL to enable persistence (optional)
 
 ## Architecture
 
-```
+```text
 HTTP / WebSocket Clients (Game UI, mobile clients, or bot swarms)
    │  REST: create/preview room       WS: realtime gameplay events
    ▼                                  ▼
@@ -36,7 +36,7 @@ clock, so the whole ruleset is tested instantly with fake time and zero sockets.
 ## HTTP API
 
 | Method | Path | Description |
-|---|---|---|
+| --- | --- | --- |
 | GET | `/` | Service metadata, status, and API routes index |
 | GET | `/healthz` | Liveness and health probe |
 | GET | `/v1/config` | Public client configuration (Google Maps API key) |
@@ -53,7 +53,7 @@ WebSocket messages are versioned JSON envelopes (`{"v":1,"type":...,"payload":..
 ## Configuration
 
 | Env | Default | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | ADDR | :8080 | Listen address |
 | DATABASE_URL | *(empty)* | Postgres DSN; empty disables persistence |
 | GOOGLE_MAPS_API_KEY | *(empty)* | Google Maps API key for 360° Street View panoramas |

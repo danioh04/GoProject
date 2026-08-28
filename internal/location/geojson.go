@@ -1,7 +1,6 @@
 package location
 
 import (
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +10,6 @@ import (
 
 	"geoduel/internal/game"
 )
-
-//go:embed default_world.geojson
-var defaultWorldGeoJSON []byte
 
 // GeoJSON RFC 7946 Structures
 type FeatureCollection struct {
@@ -50,30 +46,24 @@ type Map struct {
 	Polygons []Polygon
 }
 
-// LoadMap reads a GeoJSON map from a file path, or falls back to embedded default if empty/not found.
+// LoadMap reads a GeoJSON map from a file path. Returns nil, nil if path is empty.
 func LoadMap(path string) (*Map, error) {
-	if path != "" {
-		f, err := os.Open(path)
-		if err == nil {
-			defer f.Close()
-			m, err := ParseGeoJSON(f)
-			if err == nil && len(m.Polygons) > 0 {
-				m.Name = path
-				return m, nil
-			}
-		}
+	if path == "" {
+		return nil, nil
 	}
 
-	return ParseDefaultMap()
-}
-
-// ParseDefaultMap parses the embedded default world map.
-func ParseDefaultMap() (*Map, error) {
-	m, err := ParseGeoJSONBytes(defaultWorldGeoJSON)
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("parse default map: %w", err)
+		return nil, fmt.Errorf("open map file %q: %w", path, err)
 	}
-	m.Name = "default_world"
+	defer f.Close()
+
+	m, err := ParseGeoJSON(f)
+	if err != nil {
+		return nil, fmt.Errorf("parse map file %q: %w", path, err)
+	}
+
+	m.Name = path
 	return m, nil
 }
 
@@ -99,7 +89,7 @@ func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
 	out := &Map{Polygons: make([]Polygon, 0, len(fc.Features))}
 
 	for _, feat := range fc.Features {
-		name := "Unknown Region"
+		name := "Custom Region"
 		if n, ok := feat.Properties["name"].(string); ok && n != "" {
 			name = n
 		}
@@ -225,7 +215,7 @@ func ringToFloats(ring Ring) [][]float64 {
 // Sample generates a random valid coordinate within the map's boundary polygons using Ray-Casting PIP.
 func (m *Map) Sample(rnd *mrand.Rand) (game.LatLng, string) {
 	if len(m.Polygons) == 0 {
-		return game.LatLng{}, ""
+		return ProceduralCoordinate(rnd)
 	}
 
 	var poly Polygon
@@ -257,6 +247,21 @@ func (m *Map) Sample(rnd *mrand.Rand) (game.LatLng, string) {
 
 	// Fallback to polygon centroid if rejection sampling timed out
 	return poly.Centroid(), poly.Name
+}
+
+// ProceduralCoordinate generates a completely dynamic, non-hardcoded global coordinate.
+func ProceduralCoordinate(rnd *mrand.Rand) (game.LatLng, string) {
+	// Sample across inhabited global land latitudes (-50 to +65) and longitudes (-180 to +180)
+	var lat, lng float64
+	if rnd != nil {
+		lat = -50.0 + rnd.Float64()*115.0
+		lng = -180.0 + rnd.Float64()*360.0
+	} else {
+		lat = -50.0 + mrand.Float64()*115.0
+		lng = -180.0 + mrand.Float64()*360.0
+	}
+
+	return game.LatLng{Lat: lat, Lng: lng}, "Procedural Global"
 }
 
 // Contains checks if point is inside exterior ring and outside all interior holes (Ray-Casting Algorithm).

@@ -87,6 +87,7 @@ func main() {
 	addr := flag.String("addr", "localhost:8080", "server address")
 	rooms := flag.Int("rooms", 10, "concurrent rooms")
 	perRoom := flag.Int("per-room", 3, "players per room")
+	verbose := flag.Bool("v", false, "verbose output (print real-time match events)")
 	flag.Parse()
 
 	start := time.Now()
@@ -105,7 +106,7 @@ func main() {
 					mu.Unlock()
 				}
 			}()
-			if err := playMatch(*addr, n, *perRoom); err != nil {
+			if err := playMatch(*addr, n, *perRoom, *verbose); err != nil {
 				mu.Lock()
 				failures = append(failures, fmt.Sprintf("room %d: %v", n, err))
 				mu.Unlock()
@@ -125,10 +126,14 @@ func main() {
 	}
 }
 
-func playMatch(addr string, n, perRoom int) error {
+func playMatch(addr string, n, perRoom int, verbose bool) error {
 	code, err := createRoom(addr, fmt.Sprintf("host-%d", n))
 	if err != nil {
 		return err
+	}
+
+	if verbose {
+		fmt.Printf("\n[Room %s] Created! Joining %d bots...\n", code, perRoom)
 	}
 
 	bots := make([]*bot, perRoom)
@@ -163,6 +168,11 @@ func playMatch(addr string, n, perRoom int) error {
 			break
 		}
 	}
+
+	if verbose {
+		fmt.Printf("[Room %s] All bots connected. %s starting match...\n", code, host.label)
+	}
+
 	host.send(envelope{Version: 1, Type: "start_game"})
 
 	guesses := 0
@@ -181,31 +191,91 @@ func playMatch(addr string, n, perRoom int) error {
 		}
 		roundsPlayed++
 		var p struct {
-			Round int `json:"round"`
+			Round       int    `json:"round"`
+			TotalRounds int    `json:"total_rounds"`
+			PanoID      string `json:"pano_id"`
 		}
 		json.Unmarshal(rs.Payload, &p)
+
+		if verbose {
+			fmt.Printf("\n  ┌─ [Round %d/%d] Panorama: %s\n", p.Round, p.TotalRounds, p.PanoID)
+		}
 
 		for _, b := range bots[1:] {
 			b.readUntil("round_start")
 		}
-		time.Sleep(time.Duration(rand.IntN(200)) * time.Millisecond)
+		time.Sleep(time.Duration(rand.IntN(150)+50) * time.Millisecond)
 		for _, b := range bots {
-			lat := -50 + rand.Float64()*115
-			lng := -170 + rand.Float64()*350
+			lat := -50.0 + rand.Float64()*115.0
+			lng := -170.0 + rand.Float64()*340.0
 			body, _ := json.Marshal(map[string]float64{"lat": lat, "lng": lng})
 			b.send(envelope{Version: 1, Type: "guess", Payload: body})
 			b.readUntil("guess_ack")
 			guesses++
+			if verbose {
+				fmt.Printf("  │  -> [%s] guessed (%.4f, %.4f)\n", b.label, lat, lng)
+			}
 		}
+
+		var lastResult envelope
 		for _, b := range bots {
-			b.readUntil("round_result")
+			lastResult = b.readUntil("round_result")
+		}
+
+		if verbose {
+			var rr struct {
+				Target struct {
+					Lat   float64 `json:"lat"`
+					Lng   float64 `json:"lng"`
+					Title string  `json:"title"`
+				} `json:"target"`
+				Results []struct {
+					Nickname  string  `json:"nickname"`
+					DistanceM float64 `json:"distance_m"`
+					Score     int     `json:"score"`
+				} `json:"results"`
+			}
+			json.Unmarshal(lastResult.Payload, &rr)
+			title := ""
+			if rr.Target.Title != "" {
+				title = fmt.Sprintf("(%s)", rr.Target.Title)
+			}
+			fmt.Printf("  └─ [Round %d Reveal] Target: (%.4f, %.4f) %s\n",
+				p.Round, rr.Target.Lat, rr.Target.Lng, title)
+			for _, res := range rr.Results {
+				fmt.Printf("       ★ %-10s: %5d pts (dist: %8.1f km)\n",
+					res.Nickname, res.Score, res.DistanceM/1000.0)
+			}
 		}
 	}
 
+	var lastEnd envelope
 	for _, b := range bots[1:] {
-		b.waitForAny("game_over")
+		lastEnd, _ = b.waitForAny("game_over")
 	}
-	fmt.Printf("room %02d complete (%d rounds, %d guesses)\n", n, roundsPlayed, guesses)
+
+	if verbose {
+		var goPayload struct {
+			Standings []struct {
+				Nickname string `json:"nickname"`
+				Total    int    `json:"total"`
+			} `json:"standings"`
+		}
+		json.Unmarshal(lastEnd.Payload, &goPayload)
+		fmt.Printf("\n[Room %s] 🏆 Final Standings:\n", code)
+		for rank, s := range goPayload.Standings {
+			winnerBadge := ""
+			if rank == 0 {
+				winnerBadge = " (WINNER)"
+			}
+			fmt.Printf("  %d. %-10s: %5d pts%s\n", rank+1, s.Nickname, s.Total, winnerBadge)
+		}
+		fmt.Println()
+	}
+
+	if !verbose {
+		fmt.Printf("room %02d complete (%d rounds, %d guesses)\n", n, roundsPlayed, guesses)
+	}
 	return nil
 }
 

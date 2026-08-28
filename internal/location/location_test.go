@@ -14,7 +14,6 @@ import (
 )
 
 func TestPointInPolygonRayCasting(t *testing.T) {
-	// Simple square from (0,0) to (10,10)
 	exterior := Ring{
 		{Lat: 0, Lng: 0},
 		{Lat: 0, Lng: 10},
@@ -47,7 +46,6 @@ func TestPointInPolygonRayCasting(t *testing.T) {
 }
 
 func TestPolygonWithHole(t *testing.T) {
-	// Outer box (0,0) to (10,10) with inner hole (3,3) to (7,7)
 	poly := Polygon{
 		Name: "Donut",
 		Exterior: Ring{
@@ -72,12 +70,10 @@ func TestPolygonWithHole(t *testing.T) {
 		MaxLng: 10,
 	}
 
-	// In meat of donut (1,1) -> inside
 	if !poly.Contains(game.LatLng{Lat: 1, Lng: 1}) {
 		t.Error("point (1,1) should be inside donut")
 	}
 
-	// In hole (5,5) -> outside
 	if poly.Contains(game.LatLng{Lat: 5, Lng: 5}) {
 		t.Error("point (5,5) inside hole should be excluded")
 	}
@@ -126,17 +122,26 @@ func TestGeoJSONParsing(t *testing.T) {
 	}
 }
 
-func TestLoadMapFileAndDefault(t *testing.T) {
-	// Test Default Map
-	defMap, err := ParseDefaultMap()
-	if err != nil {
-		t.Fatalf("parse default map: %v", err)
+func TestProceduralCoordinateFallback(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		coord, region := ProceduralCoordinate(nil)
+		if !coord.Valid() {
+			t.Fatalf("invalid procedural coordinate: %+v", coord)
+		}
+		if region != "Procedural Global" {
+			t.Errorf("unexpected region: %s", region)
+		}
 	}
-	if len(defMap.Polygons) < 5 {
-		t.Errorf("default map polygon count = %d, want >= 5", len(defMap.Polygons))
+}
+
+func TestLoadMapFile(t *testing.T) {
+	// Empty path should return nil, nil
+	m, err := LoadMap("")
+	if err != nil || m != nil {
+		t.Errorf("LoadMap(\"\") = (%v, %v), want (nil, nil)", m, err)
 	}
 
-	// Test Temporary Map File
+	// Temporary Map File
 	tmpDir := t.TempDir()
 	mapPath := filepath.Join(tmpDir, "custom.geojson")
 	sampleJSON := `{
@@ -190,17 +195,19 @@ func TestSimulatedPoolOffline(t *testing.T) {
 			t.Error("pano_id should not be empty")
 		}
 	}
+
+	if pool.MapName() != "procedural" {
+		t.Errorf("expected map name 'procedural', got %q", pool.MapName())
+	}
 }
 
 func TestDynamicGoogleMetadataAPIWithMockServer(t *testing.T) {
 	var callCount atomic.Int64
 
-	// Mock Google Street View Metadata API
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := callCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 
-		// Simulate ZERO_RESULTS on every 3rd call
 		if call%3 == 0 {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": "ZERO_RESULTS",
@@ -249,8 +256,7 @@ func TestDynamicGoogleMetadataAPIWithMockServer(t *testing.T) {
 }
 
 func TestPickEdgeCases(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	pool := New(ctx, "")
 	defer pool.Close()
@@ -264,8 +270,7 @@ func TestPickEdgeCases(t *testing.T) {
 }
 
 func TestPickerClosure(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	pool := New(ctx, "")
 	defer pool.Close()

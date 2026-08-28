@@ -94,8 +94,15 @@ func WithMap(m *Map) Option {
 // WithMapFile loads the GeoJSON map from a file path.
 func WithMapFile(path string) Option {
 	return func(p *Pool) {
-		if m, err := LoadMap(path); err == nil && m != nil {
-			p.geoMap = m
+		if path != "" {
+			m, err := LoadMap(path)
+			if err != nil {
+				if p.logger != nil {
+					p.logger.Error("failed to load map file", "path", path, "error", err)
+				}
+			} else {
+				p.geoMap = m
+			}
 		}
 	}
 }
@@ -118,26 +125,21 @@ func New(ctx context.Context, apiKey string, opts ...Option) *Pool {
 		opt(p)
 	}
 
-	if p.geoMap == nil {
-		defaultMap, err := ParseDefaultMap()
-		if err != nil {
-			p.logger.Error("failed to load default embedded map", "error", err)
-		}
-		p.geoMap = defaultMap
-	}
-
 	p.startWorkers(defaultWorkers)
 	return p
 }
 
 func (p *Pool) startWorkers(count int) {
-	for i := 0; i < count; i++ {
+	for i := range count {
 		p.wg.Add(1)
-		go p.workerLoop(i)
+		go func() {
+			var _ int = i
+			p.workerLoop()
+		}()
 	}
 }
 
-func (p *Pool) workerLoop(workerID int) {
+func (p *Pool) workerLoop() {
 	defer p.wg.Done()
 
 	for {
@@ -171,6 +173,8 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 
 	if p.geoMap != nil {
 		coord, regionName = p.geoMap.Sample(nil)
+	} else {
+		coord, regionName = ProceduralCoordinate(nil)
 	}
 
 	if !coord.Valid() {
@@ -235,11 +239,13 @@ func (p *Pool) Pick(n int) []game.Location {
 				out = append(out, loc)
 			}
 		case <-time.After(150 * time.Millisecond):
-			// If buffer is drained, sample directly from map
+			// If buffer is drained, sample directly
 			var coord game.LatLng
 			var region string
 			if p.geoMap != nil {
 				coord, region = p.geoMap.Sample(nil)
+			} else {
+				coord, region = ProceduralCoordinate(nil)
 			}
 			fallback := simulatedLocation(coord, region)
 			if _, exists := seen[fallback.ID]; !exists {
@@ -269,7 +275,7 @@ func (p *Pool) MapName() string {
 	if p.geoMap != nil {
 		return p.geoMap.Name
 	}
-	return "none"
+	return "procedural"
 }
 
 // Close gracefully terminates background discovery workers.
