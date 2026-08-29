@@ -3,13 +3,12 @@ package api
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"geoduel/internal/hub"
 	"geoduel/internal/metrics"
+	"geoduel/internal/randutil"
 	"geoduel/internal/store"
 	"geoduel/internal/wsutil"
 	"log/slog"
@@ -35,12 +34,8 @@ type server struct {
 	googleMapsAPIKey string
 }
 
-func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence, googleMapsAPIKey ...string) http.Handler {
-	var key string
-	if len(googleMapsAPIKey) > 0 {
-		key = googleMapsAPIKey[0]
-	}
-	s := &server{logger: logger, rooms: rooms, stats: persistence, googleMapsAPIKey: key}
+func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence, googleMapsAPIKey string) http.Handler {
+	s := &server{logger: logger, rooms: rooms, stats: persistence, googleMapsAPIKey: googleMapsAPIKey}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleRoot)
@@ -52,7 +47,7 @@ func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence, googleMap
 	mux.HandleFunc("GET /v1/stats/hardest", s.handleHardestLocations)
 	mux.HandleFunc("GET /v1/games/{id}", s.handleGameDetail)
 
-	return logRequests(logger)(requestIDs(recoverPanics(logger)(mux)))
+	return requestIDs(logRequests(logger)(recoverPanics(logger)(mux)))
 }
 
 func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +197,7 @@ func (s *server) handleGameDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
-// --- Request DTOs & Encoding Helpers ---
+// --- Request DTOs & Validation Helpers ---
 
 type createRoomRequest struct {
 	Nickname string `json:"nickname"`
@@ -226,6 +221,8 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, v any) error {
 	return nil
 }
 
+// --- HTTP Response Helpers ---
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -236,6 +233,43 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// --- Middleware Pipeline ---
+
+type requestIDKey struct{}
+
+func requestIDs(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := randutil.Hex(8)
+		w.Header().Set("X-Request-ID", id)
+		ctx := context.WithValue(r.Context(), requestIDKey{}, id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func requestIDFrom(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		return id
+	}
+	return ""
+}
+
+func logRequests(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(sw, r)
+			logger.Info("request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", sw.status,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"request_id", requestIDFrom(r.Context()),
+			)
+		})
+	}
 }
 
 type statusWriter struct {
@@ -265,46 +299,6 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	}
 	w.status = http.StatusSwitchingProtocols
 	return h.Hijack()
-}
-
-type requestIDKey struct{}
-
-func requestIDs(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b [8]byte
-		if _, err := rand.Read(b[:]); err != nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		id := hex.EncodeToString(b[:])
-		w.Header().Set("X-Request-ID", id)
-		ctx := context.WithValue(r.Context(), requestIDKey{}, id)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func requestIDFrom(ctx context.Context) string {
-	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
-		return id
-	}
-	return ""
-}
-
-func logRequests(logger *slog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			start := time.Now()
-			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(sw, r)
-			logger.Info("request",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"status", sw.status,
-				"duration_ms", time.Since(start).Milliseconds(),
-				"request_id", requestIDFrom(r.Context()),
-			)
-		})
-	}
 }
 
 func recoverPanics(logger *slog.Logger) func(http.Handler) http.Handler {

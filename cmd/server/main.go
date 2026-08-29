@@ -5,13 +5,6 @@ import (
 	"errors"
 	_ "expvar"
 	"fmt"
-	"geoduel/internal/api"
-	"geoduel/internal/config"
-	"geoduel/internal/game"
-	"geoduel/internal/hub"
-	"geoduel/internal/location"
-	"geoduel/internal/room"
-	"geoduel/internal/store"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,6 +13,14 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"geoduel/internal/api"
+	"geoduel/internal/config"
+	"geoduel/internal/game"
+	"geoduel/internal/hub"
+	"geoduel/internal/location"
+	"geoduel/internal/room"
+	"geoduel/internal/store"
 )
 
 func main() {
@@ -58,14 +59,14 @@ func run(ctx context.Context) error {
 	var persistence api.Persistence
 	if cfg.DatabaseURL != "" {
 		bootCtx, cancelBoot := context.WithTimeout(ctx, 10*time.Second)
+		defer cancelBoot()
 		var err error
 		pgStore, err = store.Open(bootCtx, cfg.DatabaseURL)
-		cancelBoot()
 		if err != nil {
 			return fmt.Errorf("connect to database: %w", err)
 		}
 		defer pgStore.Close()
-		if err := pgStore.Migrate(ctx); err != nil {
+		if err := pgStore.Migrate(bootCtx); err != nil {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 		persistence = pgStore
@@ -76,7 +77,7 @@ func run(ctx context.Context) error {
 
 	opts := room.Options{
 		MaxPlayers: cfg.MaxPlayers,
-		Picker:     pool.Picker(nil),
+		Picker:     pool.Picker(),
 		Config:     gameCfg,
 	}
 	if pgStore != nil {

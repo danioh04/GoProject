@@ -2,13 +2,11 @@ package location
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"geoduel/internal/game"
+	"geoduel/internal/randutil"
 	"log/slog"
-	mrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"sync"
@@ -126,6 +124,7 @@ func (p *Pool) Pick(n int) []game.Location {
 	out := make([]game.Location, 0, n)
 	seen := make(map[string]struct{}, n)
 
+	// First, drain any immediately available locations non-blockingly
 	for len(out) < n {
 		select {
 		case loc := <-p.buffer:
@@ -133,19 +132,60 @@ func (p *Pool) Pick(n int) []game.Location {
 				seen[loc.ID] = struct{}{}
 				out = append(out, loc)
 			}
-		case <-time.After(150 * time.Millisecond):
-			// If buffer is drained, sample directly
-			var coord game.LatLng
-			if p.geoMap != nil {
-				coord = p.geoMap.Sample(nil)
-			} else {
-				coord = ProceduralCoordinate(nil)
+		default:
+			goto waitForBuffer
+		}
+	}
+	return out
+
+waitForBuffer:
+	// Live Google Maps mode: wait for background workers or query API directly
+	if p.apiKey != "" {
+		timer := time.NewTimer(300 * time.Millisecond)
+		defer timer.Stop()
+
+		for len(out) < n {
+			select {
+			case loc := <-p.buffer:
+				if _, exists := seen[loc.ID]; !exists && loc.Valid() {
+					seen[loc.ID] = struct{}{}
+					out = append(out, loc)
+				}
+			case <-timer.C:
+				// Discover directly if background workers lagged
+				loc, err := p.discoverOne(p.ctx)
+				if err == nil && loc.Valid() {
+					if _, exists := seen[loc.ID]; !exists {
+						seen[loc.ID] = struct{}{}
+						out = append(out, loc)
+					}
+				} else if p.logger != nil {
+					p.logger.Warn("direct street view discovery failed", "error", err)
+				}
 			}
-			fallback := simulatedLocation(coord)
-			if _, exists := seen[fallback.ID]; !exists {
-				seen[fallback.ID] = struct{}{}
-				out = append(out, fallback)
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
+			timer.Reset(300 * time.Millisecond)
+		}
+		return out
+	}
+
+	// Offline simulation mode: immediately sample simulated coordinates
+	for len(out) < n {
+		var coord game.LatLng
+		if p.geoMap != nil {
+			coord = p.geoMap.Sample(nil)
+		} else {
+			coord = ProceduralCoordinate(nil)
+		}
+		fallback := simulatedLocation(coord)
+		if _, exists := seen[fallback.ID]; !exists {
+			seen[fallback.ID] = struct{}{}
+			out = append(out, fallback)
 		}
 	}
 
@@ -153,15 +193,10 @@ func (p *Pool) Pick(n int) []game.Location {
 }
 
 // Picker returns a picker closure compatible with game.Engine.
-func (p *Pool) Picker(_ *mrand.Rand) func(n int) []game.Location {
+func (p *Pool) Picker() func(n int) []game.Location {
 	return func(n int) []game.Location {
 		return p.Pick(n)
 	}
-}
-
-// BufferLen returns current count of pre-warmed locations available.
-func (p *Pool) BufferLen() int {
-	return len(p.buffer)
 }
 
 // MapName returns the active map name.
@@ -275,10 +310,7 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 }
 
 func simulatedLocation(coord game.LatLng) game.Location {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	panoID := "sim_" + hex.EncodeToString(b[:])
-
+	panoID := "sim_" + randutil.Hex(8)
 	return game.Location{
 		ID:     panoID,
 		PanoID: panoID,
@@ -293,6 +325,4 @@ type metadataResponse struct {
 		Lat float64 `json:"lat"`
 		Lng float64 `json:"lng"`
 	} `json:"location"`
-	Copyright string `json:"copyright"`
-	Date      string `json:"date"`
 }

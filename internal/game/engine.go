@@ -159,7 +159,7 @@ func (e *Engine) applyTimeout(ev TimeoutEvent) []Action {
 func (e *Engine) removePlayer(id PlayerID) {
 	for i, oid := range e.order {
 		if oid == id {
-			e.order = append(e.order[:i], e.order[i+1:]...)
+			e.order = slices.Delete(e.order, i, i+1)
 			break
 		}
 	}
@@ -271,15 +271,11 @@ func (e *Engine) sortedStandings() []Standing {
 }
 
 func sortResultsByScore(results []RoundResult, order []PlayerID) {
-	rank := make(map[PlayerID]int, len(order))
-	for i, id := range order {
-		rank[id] = i
-	}
 	slices.SortStableFunc(results, func(a, b RoundResult) int {
 		if a.Score != b.Score {
 			return cmp.Compare(b.Score, a.Score)
 		}
-		return cmp.Compare(rank[a.PlayerID], rank[b.PlayerID])
+		return cmp.Compare(slices.Index(order, a.PlayerID), slices.Index(order, b.PlayerID))
 	})
 }
 

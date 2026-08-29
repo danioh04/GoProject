@@ -19,7 +19,6 @@ const (
 	MaxMessageBytes = 1 << 12
 	SendBuffer      = 16
 	PingInterval    = 25 * time.Second
-	PongTimeout     = 90 * time.Second
 	WriteTimeout    = 5 * time.Second
 
 	TypeGuess       = "guess"
@@ -169,9 +168,7 @@ func (s *Session) Kick() {
 
 func (s *Session) readPump(onMessage func(Envelope)) {
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), PongTimeout)
-		_, data, err := s.conn.Read(ctx)
-		cancel()
+		_, data, err := s.conn.Read(context.Background())
 		if err != nil {
 			s.teardown()
 			return

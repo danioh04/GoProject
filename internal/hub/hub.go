@@ -2,9 +2,8 @@
 package hub
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"geoduel/internal/metrics"
+	"geoduel/internal/randutil"
 	"geoduel/internal/room"
 	"log/slog"
 	mrand "math/rand/v2"
@@ -134,9 +133,5 @@ func generateCode() string {
 }
 
 func generateID() string {
-	var b [idBytes]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return time.Now().UTC().Format("20060102150405.000000000")[:24]
-	}
-	return hex.EncodeToString(b[:])
+	return randutil.Hex(idBytes)
 }

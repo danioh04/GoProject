@@ -8,12 +8,16 @@ import (
 	"io"
 	mrand "math/rand/v2"
 	"os"
+	"slices"
 )
 
-// Map holds parsed geographic boundary polygons and samplers.
+// Map holds parsed geographic boundary polygons, discrete points, and samplers.
 type Map struct {
-	Name     string
-	Polygons []Polygon
+	Name            string
+	Points          []game.LatLng
+	Polygons        []Polygon
+	CumulativeAreas []float64
+	TotalArea       float64
 }
 
 type Ring []game.LatLng
@@ -25,6 +29,7 @@ type Polygon struct {
 	MaxLat   float64
 	MinLng   float64
 	MaxLng   float64
+	Area     float64
 }
 
 // GeoJSON RFC 7946 Structures
@@ -82,18 +87,43 @@ func ParseGeoJSONBytes(data []byte) (*Map, error) {
 	return buildMapFromCollection(fc)
 }
 
-// Sample generates a random valid coordinate within the map's boundary polygons using Ray-Casting PIP.
+// Sample generates a random valid coordinate from the map.
+// If the map contains discrete Points (e.g. landmark sets), it samples them directly in O(1).
+// If the map contains Polygons (e.g. country boundaries), it samples using Ray-Casting PIP.
 func (m *Map) Sample(rnd *mrand.Rand) game.LatLng {
-	if len(m.Polygons) == 0 {
+	hasPoints := len(m.Points) > 0
+	hasPolys := len(m.Polygons) > 0
+
+	if !hasPoints && !hasPolys {
 		return ProceduralCoordinate(rnd)
 	}
 
-	var poly Polygon
-	if rnd != nil {
-		poly = m.Polygons[rnd.IntN(len(m.Polygons))]
-	} else {
-		poly = m.Polygons[mrand.IntN(len(m.Polygons))]
+	// If map only has points, pick directly
+	if hasPoints && !hasPolys {
+		if rnd != nil {
+			return m.Points[rnd.IntN(len(m.Points))]
+		}
+		return m.Points[mrand.IntN(len(m.Points))]
 	}
+
+	// If map has both, choose between discrete points and polygons
+	if hasPoints && hasPolys {
+		pickPoint := false
+		if rnd != nil {
+			pickPoint = rnd.Float64() < 0.5
+		} else {
+			pickPoint = mrand.Float64() < 0.5
+		}
+		if pickPoint {
+			if rnd != nil {
+				return m.Points[rnd.IntN(len(m.Points))]
+			}
+			return m.Points[mrand.IntN(len(m.Points))]
+		}
+	}
+
+	// Area-weighted polygon selection (O(log N) binary search on precomputed weights)
+	poly := m.selectWeightedPolygon(rnd)
 
 	latRange := poly.MaxLat - poly.MinLat
 	lngRange := poly.MaxLng - poly.MinLng
@@ -117,6 +147,25 @@ func (m *Map) Sample(rnd *mrand.Rand) game.LatLng {
 
 	// Fallback to polygon centroid if rejection sampling timed out
 	return poly.Centroid()
+}
+
+func (m *Map) selectWeightedPolygon(rnd *mrand.Rand) Polygon {
+	if len(m.Polygons) == 1 || m.TotalArea <= 0 {
+		return m.Polygons[0]
+	}
+
+	var target float64
+	if rnd != nil {
+		target = rnd.Float64() * m.TotalArea
+	} else {
+		target = mrand.Float64() * m.TotalArea
+	}
+
+	idx, _ := slices.BinarySearch(m.CumulativeAreas, target)
+	if idx >= len(m.Polygons) {
+		idx = len(m.Polygons) - 1
+	}
+	return m.Polygons[idx]
 }
 
 // Contains checks if point is inside exterior ring and outside all interior holes (Ray-Casting Algorithm).
@@ -146,23 +195,16 @@ func (p *Polygon) Centroid() game.LatLng {
 	}
 }
 
-// ProceduralCoordinate generates a completely dynamic, non-hardcoded global coordinate.
+// ProceduralCoordinate generates a realistic global coordinate from curated anchor seed hubs.
 func ProceduralCoordinate(rnd *mrand.Rand) game.LatLng {
-	// Sample across inhabited global land latitudes (-50 to +65) and longitudes (-180 to +180)
-	var lat, lng float64
-	if rnd != nil {
-		lat = -50.0 + rnd.Float64()*115.0
-		lng = -180.0 + rnd.Float64()*360.0
-	} else {
-		lat = -50.0 + mrand.Float64()*115.0
-		lng = -180.0 + mrand.Float64()*360.0
-	}
-
-	return game.LatLng{Lat: lat, Lng: lng}
+	return GlobalAnchorCoordinate(rnd)
 }
 
 func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
-	out := &Map{Polygons: make([]Polygon, 0, len(fc.Features))}
+	out := &Map{
+		Points:   make([]game.LatLng, 0),
+		Polygons: make([]Polygon, 0, len(fc.Features)),
+	}
 
 	for _, feat := range fc.Features {
 		switch feat.Geometry.Type {
@@ -193,24 +235,46 @@ func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
 			if err := json.Unmarshal(feat.Geometry.Coordinates, &raw); err != nil || len(raw) < 2 {
 				continue
 			}
-			// Treat Point as a micro-polygon bounding box around coordinate
 			lng, lat := raw[0], raw[1]
-			ring := Ring{
-				{Lat: lat - 0.05, Lng: lng - 0.05},
-				{Lat: lat + 0.05, Lng: lng - 0.05},
-				{Lat: lat + 0.05, Lng: lng + 0.05},
-				{Lat: lat - 0.05, Lng: lng + 0.05},
-				{Lat: lat - 0.05, Lng: lng - 0.05},
+			pt := game.LatLng{Lat: lat, Lng: lng}
+			if pt.Valid() {
+				out.Points = append(out.Points, pt)
 			}
-			poly, ok := parsePolygon([][][]float64{ringToFloats(ring)})
-			if ok {
-				out.Polygons = append(out.Polygons, poly)
+
+		case "MultiPoint":
+			var raw [][]float64
+			if err := json.Unmarshal(feat.Geometry.Coordinates, &raw); err != nil {
+				continue
+			}
+			for _, c := range raw {
+				if len(c) >= 2 {
+					pt := game.LatLng{Lat: c[1], Lng: c[0]}
+					if pt.Valid() {
+						out.Points = append(out.Points, pt)
+					}
+				}
 			}
 		}
 	}
 
-	if len(out.Polygons) == 0 {
-		return nil, errors.New("no valid polygons found in GeoJSON")
+	if len(out.Polygons) == 0 && len(out.Points) == 0 {
+		return nil, errors.New("no valid polygons or points found in GeoJSON")
+	}
+
+	// Precompute polygon bounding box areas and cumulative distribution for O(log N) sampling
+	if len(out.Polygons) > 0 {
+		out.CumulativeAreas = make([]float64, len(out.Polygons))
+		var running float64
+		for i := range out.Polygons {
+			p := &out.Polygons[i]
+			p.Area = (p.MaxLat - p.MinLat) * (p.MaxLng - p.MinLng)
+			if p.Area <= 0 {
+				p.Area = 0.001
+			}
+			running += p.Area
+			out.CumulativeAreas[i] = running
+		}
+		out.TotalArea = running
 	}
 
 	return out, nil
@@ -272,14 +336,6 @@ func parseRing(coords [][]float64) Ring {
 		}
 	}
 	return ring
-}
-
-func ringToFloats(ring Ring) [][]float64 {
-	out := make([][]float64, len(ring))
-	for i, pt := range ring {
-		out[i] = []float64{pt.Lng, pt.Lat}
-	}
-	return out
 }
 
 func pointInRing(pt game.LatLng, ring Ring) bool {

@@ -3,8 +3,12 @@ package game
 import "math"
 
 const (
-	earthRadiusM  = 6371008.8
-	mapSizeKM     = 14916.862
+	// earthRadiusM is the mean Earth radius in meters (IUGG recommended value).
+	earthRadiusM = 6371008.8
+	// mapSizeKM is the half-circumference scaling constant (~14,916.86 km) used to calibrate
+	// the GeoGuessr exponential score curve across global distances.
+	mapSizeKM = 14916.862
+	// decayConstant controls the rate of exponential score dropoff as guess distance increases.
 	decayConstant = 10.0
 )
 

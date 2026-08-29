@@ -57,8 +57,8 @@ WebSocket messages are versioned JSON envelopes (`{"v":1,"type":...,"payload":..
 | ADDR | :8080 | Listen address |
 | DATABASE_URL | *(empty)* | Postgres DSN; empty disables persistence |
 | GOOGLE_MAPS_API_KEY | *(empty)* | Google Maps API key for 360° Street View panoramas |
-| MAP_FILE | *(empty)* | Path to custom GeoJSON map pack (falls back to embedded world map) |
-| MAX_ROOM_SIZE | 8 | Players per room |
+| MAP_FILE | *(empty)* | Path to custom GeoJSON map pack (falls back to global anchor seed distribution) |
+| MAX_PLAYERS | 8 | Maximum players per room |
 | ROUNDS / ROUND_SECONDS / REVEAL_SECONDS | 5 / 60 / 10 | Match timing |
 | LOG_LEVEL / LOG_FORMAT | info / text | slog settings (`json` also supported) |
 | DEBUG_ADDR | *(empty)* | Serve expvar metrics + pprof (e.g. `:6060`) |

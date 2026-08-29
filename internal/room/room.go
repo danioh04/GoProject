@@ -5,11 +5,10 @@ package room
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"geoduel/internal/game"
 	"geoduel/internal/metrics"
+	"geoduel/internal/randutil"
 	"geoduel/internal/wsutil"
 	"log/slog"
 	"sync"
@@ -50,14 +49,12 @@ type Options struct {
 	Store      Store
 }
 
-type FinishedRound = game.FinishedRound
-
 type FinishedGame struct {
 	ID          string
 	CreatedAt   time.Time
 	TotalRounds int
 	Standings   []game.Standing
-	Rounds      []FinishedRound
+	Rounds      []game.FinishedRound
 }
 
 type Store interface {
@@ -208,13 +205,7 @@ func (r *Room) shutdown() {
 }
 
 func (r *Room) handleAttach(cmd attachCommand) {
-	playerID, err := newPlayerID()
-	if err != nil {
-		r.logger.Error("mint identity", "error", err)
-		cmd.reply <- AttachOutcome{Reason: "internal error"}
-		return
-	}
-
+	playerID := newPlayerID()
 	acts := r.engine.Apply(game.JoinEvent{PlayerID: playerID, Nickname: cmd.nickname})
 	if reason, rejected := findRejected(acts, playerID); rejected {
 		cmd.reply <- AttachOutcome{Reason: reason}
@@ -337,7 +328,7 @@ func (r *Room) armTimer(tag game.TimerTag, delay time.Duration) {
 	})
 }
 
-func (r *Room) flushMatch(standings []game.Standing, rounds []FinishedRound) {
+func (r *Room) flushMatch(standings []game.Standing, rounds []game.FinishedRound) {
 	if r.store == nil {
 		return
 	}
@@ -349,9 +340,7 @@ func (r *Room) flushMatch(standings []game.Standing, rounds []FinishedRound) {
 		Rounds:      rounds,
 	}
 
-	r.bgWg.Add(1)
-	go func() {
-		defer r.bgWg.Done()
+	r.bgWg.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := r.store.SaveGame(ctx, fg); err != nil {
@@ -359,7 +348,7 @@ func (r *Room) flushMatch(standings []game.Standing, rounds []FinishedRound) {
 			return
 		}
 		r.logger.Info("game saved", "game_id", fg.ID)
-	}()
+	})
 }
 
 func (r *Room) stopTimers() {
@@ -491,18 +480,10 @@ func findRejected(acts []game.Action, playerID game.PlayerID) (string, bool) {
 	return "", false
 }
 
-func newPlayerID() (game.PlayerID, error) {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return game.PlayerID(hex.EncodeToString(b[:])), nil
+func newPlayerID() game.PlayerID {
+	return game.PlayerID(randutil.Hex(8))
 }
 
 func newMatchID() string {
-	var b [12]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return time.Now().UTC().Format("20060102T150405.000000000")
-	}
-	return hex.EncodeToString(b[:])
+	return randutil.Hex(12)
 }

@@ -16,77 +16,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-type envelope struct {
-	Version int             `json:"v"`
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-}
-
-type bot struct {
-	conn   *websocket.Conn
-	label  string
-	isHost bool
-	in     chan envelope
-	err    chan error
-}
-
-func (b *bot) send(env envelope) {
-	data, _ := json.Marshal(env)
-	ctx, cancel := requestCtx()
-	defer cancel()
-	if err := b.conn.Write(ctx, websocket.MessageText, data); err != nil {
-		panic(fmt.Sprintf("[%s] write: %v", b.label, err))
-	}
-}
-
-func (b *bot) readLoop() {
-	for {
-		_, data, err := b.conn.Read(context.Background())
-		if err != nil {
-			select {
-			case b.err <- err:
-			default:
-			}
-			return
-		}
-		var env envelope
-		if err := json.Unmarshal(data, &env); err == nil {
-			b.in <- env
-		}
-	}
-}
-
-func (b *bot) readUntil(want ...string) envelope {
-	timeout := time.After(20 * time.Second)
-	for {
-		select {
-		case env := <-b.in:
-			if slices.Contains(want, env.Type) {
-				return env
-			}
-		case err := <-b.err:
-			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
-		case <-timeout:
-			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
-		}
-	}
-}
-
-func (b *bot) waitForAny(want ...string) (envelope, bool) {
-	timeout := time.After(20 * time.Second)
-	for {
-		select {
-		case env := <-b.in:
-			if slices.Contains(want, env.Type) {
-				return env, env.Type != "game_over"
-			}
-		case err := <-b.err:
-			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
-		case <-timeout:
-			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
-		}
-	}
-}
+// --- CLI Entry Point ---
 
 func main() {
 	addr := flag.String("addr", "localhost:8080", "server address")
@@ -131,6 +61,8 @@ func main() {
 	}
 }
 
+// --- Match Simulation Orchestrator ---
+
 func playMatch(addr string, n, perRoom int, verbose bool) error {
 	code, err := createRoom(addr, fmt.Sprintf("host-%d", n))
 	if err != nil {
@@ -142,6 +74,14 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 	}
 
 	bots := make([]*bot, perRoom)
+	defer func() {
+		for _, b := range bots {
+			if b != nil && b.conn != nil {
+				b.conn.CloseNow()
+			}
+		}
+	}()
+
 	var firstErr error
 	var once sync.Once
 	report := func(err error) {
@@ -188,10 +128,12 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 		}
 	}
 
+	var lastEnd envelope
 	roundsPlayed := 0
 	for {
 		rs, isRound := bots[0].waitForAny("round_start", "game_over")
 		if !isRound {
+			lastEnd = rs
 			break
 		}
 		roundsPlayed++
@@ -249,9 +191,8 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 		}
 	}
 
-	var lastEnd envelope
 	for _, b := range bots[1:] {
-		lastEnd, _ = b.waitForAny("game_over")
+		_, _ = b.waitForAny("game_over")
 	}
 
 	if verbose {
@@ -278,6 +219,88 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 	}
 	return nil
 }
+
+// --- Types & Bot Receiver Methods ---
+
+type envelope struct {
+	Version int             `json:"v"`
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+type bot struct {
+	conn   *websocket.Conn
+	label  string
+	isHost bool
+	in     chan envelope
+	err    chan error
+}
+
+func (b *bot) send(env envelope) {
+	data, _ := json.Marshal(env)
+	ctx, cancel := requestCtx()
+	defer cancel()
+	if err := b.conn.Write(ctx, websocket.MessageText, data); err != nil {
+		panic(fmt.Sprintf("[%s] write: %v", b.label, err))
+	}
+}
+
+func (b *bot) readLoop() {
+	for {
+		_, data, err := b.conn.Read(context.Background())
+		if err != nil {
+			select {
+			case b.err <- err:
+			default:
+			}
+			return
+		}
+		var env envelope
+		if err := json.Unmarshal(data, &env); err == nil {
+			b.in <- env
+		}
+	}
+}
+
+func (b *bot) readUntil(want ...string) envelope {
+	timeout := time.After(20 * time.Second)
+	for {
+		select {
+		case env := <-b.in:
+			if slices.Contains(want, env.Type) {
+				return env
+			}
+			if env.Type == "error" {
+				panic(fmt.Sprintf("[%s] server error while waiting for %v: %s", b.label, want, string(env.Payload)))
+			}
+		case err := <-b.err:
+			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
+		case <-timeout:
+			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
+		}
+	}
+}
+
+func (b *bot) waitForAny(want ...string) (envelope, bool) {
+	timeout := time.After(20 * time.Second)
+	for {
+		select {
+		case env := <-b.in:
+			if slices.Contains(want, env.Type) {
+				return env, env.Type != "game_over"
+			}
+			if env.Type == "error" {
+				panic(fmt.Sprintf("[%s] server error while waiting for %v: %s", b.label, want, string(env.Payload)))
+			}
+		case err := <-b.err:
+			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
+		case <-timeout:
+			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
+		}
+	}
+}
+
+// --- HTTP & WebSocket Protocol Helpers ---
 
 func createRoom(addr, nickname string) (string, error) {
 	body := strings.NewReader(fmt.Sprintf(`{"nickname":%q}`, nickname))
