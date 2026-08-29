@@ -22,17 +22,6 @@ const (
 	defaultWorkers      = 3
 )
 
-type metadataResponse struct {
-	Status   string `json:"status"`
-	PanoID   string `json:"pano_id"`
-	Location struct {
-		Lat float64 `json:"lat"`
-		Lng float64 `json:"lng"`
-	} `json:"location"`
-	Copyright string `json:"copyright"`
-	Date      string `json:"date"`
-}
-
 // Pool maintains a pre-warmed background buffer of live discovered Google Street View locations.
 type Pool struct {
 	apiKey     string
@@ -128,6 +117,75 @@ func New(ctx context.Context, apiKey string, opts ...Option) *Pool {
 	return p
 }
 
+// Pick returns n distinct locations from the pre-warmed discovery buffer.
+func (p *Pool) Pick(n int) []game.Location {
+	if n <= 0 {
+		return nil
+	}
+
+	out := make([]game.Location, 0, n)
+	seen := make(map[string]struct{}, n)
+
+	for len(out) < n {
+		select {
+		case loc := <-p.buffer:
+			if _, exists := seen[loc.ID]; !exists && loc.Valid() {
+				seen[loc.ID] = struct{}{}
+				out = append(out, loc)
+			}
+		case <-time.After(150 * time.Millisecond):
+			// If buffer is drained, sample directly
+			var coord game.LatLng
+			if p.geoMap != nil {
+				coord = p.geoMap.Sample(nil)
+			} else {
+				coord = ProceduralCoordinate(nil)
+			}
+			fallback := simulatedLocation(coord)
+			if _, exists := seen[fallback.ID]; !exists {
+				seen[fallback.ID] = struct{}{}
+				out = append(out, fallback)
+			}
+		}
+	}
+
+	return out
+}
+
+// Picker returns a picker closure compatible with game.Engine.
+func (p *Pool) Picker(_ *mrand.Rand) func(n int) []game.Location {
+	return func(n int) []game.Location {
+		return p.Pick(n)
+	}
+}
+
+// BufferLen returns current count of pre-warmed locations available.
+func (p *Pool) BufferLen() int {
+	return len(p.buffer)
+}
+
+// MapName returns the active map name.
+func (p *Pool) MapName() string {
+	if p.geoMap != nil {
+		return p.geoMap.Name
+	}
+	return "procedural"
+}
+
+// Close gracefully terminates background discovery workers.
+func (p *Pool) Close() {
+	p.mu.Lock()
+	if p.isClosed {
+		p.mu.Unlock()
+		return
+	}
+	p.isClosed = true
+	p.mu.Unlock()
+
+	p.cancel()
+	p.wg.Wait()
+}
+
 func (p *Pool) startWorkers(count int) {
 	for i := range count {
 		p.wg.Add(1)
@@ -217,75 +275,6 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 	}, nil
 }
 
-// Pick returns n distinct locations from the pre-warmed discovery buffer.
-func (p *Pool) Pick(n int) []game.Location {
-	if n <= 0 {
-		return nil
-	}
-
-	out := make([]game.Location, 0, n)
-	seen := make(map[string]struct{}, n)
-
-	for len(out) < n {
-		select {
-		case loc := <-p.buffer:
-			if _, exists := seen[loc.ID]; !exists && loc.Valid() {
-				seen[loc.ID] = struct{}{}
-				out = append(out, loc)
-			}
-		case <-time.After(150 * time.Millisecond):
-			// If buffer is drained, sample directly
-			var coord game.LatLng
-			if p.geoMap != nil {
-				coord = p.geoMap.Sample(nil)
-			} else {
-				coord = ProceduralCoordinate(nil)
-			}
-			fallback := simulatedLocation(coord)
-			if _, exists := seen[fallback.ID]; !exists {
-				seen[fallback.ID] = struct{}{}
-				out = append(out, fallback)
-			}
-		}
-	}
-
-	return out
-}
-
-// Picker returns a picker closure compatible with game.Engine.
-func (p *Pool) Picker(_ *mrand.Rand) func(n int) []game.Location {
-	return func(n int) []game.Location {
-		return p.Pick(n)
-	}
-}
-
-// BufferLen returns current count of pre-warmed locations available.
-func (p *Pool) BufferLen() int {
-	return len(p.buffer)
-}
-
-// MapName returns the active map name.
-func (p *Pool) MapName() string {
-	if p.geoMap != nil {
-		return p.geoMap.Name
-	}
-	return "procedural"
-}
-
-// Close gracefully terminates background discovery workers.
-func (p *Pool) Close() {
-	p.mu.Lock()
-	if p.isClosed {
-		p.mu.Unlock()
-		return
-	}
-	p.isClosed = true
-	p.mu.Unlock()
-
-	p.cancel()
-	p.wg.Wait()
-}
-
 func simulatedLocation(coord game.LatLng) game.Location {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
@@ -296,4 +285,15 @@ func simulatedLocation(coord game.LatLng) game.Location {
 		PanoID: panoID,
 		LatLng: coord,
 	}
+}
+
+type metadataResponse struct {
+	Status   string `json:"status"`
+	PanoID   string `json:"pano_id"`
+	Location struct {
+		Lat float64 `json:"lat"`
+		Lng float64 `json:"lng"`
+	} `json:"location"`
+	Copyright string `json:"copyright"`
+	Date      string `json:"date"`
 }

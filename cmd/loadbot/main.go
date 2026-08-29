@@ -16,10 +16,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-func requestCtx() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 15*time.Second)
-}
-
 type envelope struct {
 	Version int             `json:"v"`
 	Type    string          `json:"type"`
@@ -32,6 +28,15 @@ type bot struct {
 	isHost bool
 	in     chan envelope
 	err    chan error
+}
+
+func (b *bot) send(env envelope) {
+	data, _ := json.Marshal(env)
+	ctx, cancel := requestCtx()
+	defer cancel()
+	if err := b.conn.Write(ctx, websocket.MessageText, data); err != nil {
+		panic(fmt.Sprintf("[%s] write: %v", b.label, err))
+	}
 }
 
 func (b *bot) readLoop() {
@@ -257,7 +262,7 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 			} `json:"standings"`
 		}
 		_ = json.Unmarshal(lastEnd.Payload, &goPayload)
-		fmt.Printf("\n[Room %s] 🏆 Final Standings:\n", code)
+		fmt.Printf("\n[Room %s] Final Standings:\n", code)
 		for rank, s := range goPayload.Standings {
 			winnerBadge := ""
 			if rank == 0 {
@@ -317,11 +322,6 @@ func join(addr, code, name string) (*bot, error) {
 	return b, nil
 }
 
-func (b *bot) send(env envelope) {
-	data, _ := json.Marshal(env)
-	ctx, cancel := requestCtx()
-	defer cancel()
-	if err := b.conn.Write(ctx, websocket.MessageText, data); err != nil {
-		panic(fmt.Sprintf("[%s] write: %v", b.label, err))
-	}
+func requestCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 15*time.Second)
 }

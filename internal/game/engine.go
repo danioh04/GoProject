@@ -11,10 +11,9 @@ import (
 )
 
 type Engine struct {
-	cfg  Config
-	now  func() time.Time
-	pick func(int) []Location
-
+	cfg           Config
+	now           func() time.Time
+	pick          func(int) []Location
 	phase         Phase
 	players       map[PlayerID]*Player
 	order         []PlayerID
@@ -70,10 +69,6 @@ func (e *Engine) Roster() []Player {
 	return out
 }
 
-func reject(id PlayerID, format string, args ...any) []Action {
-	return []Action{RejectedAction{PlayerID: id, Reason: fmt.Sprintf(format, args...)}}
-}
-
 func (e *Engine) applyJoin(ev JoinEvent) []Action {
 	if e.phase != PhaseLobby {
 		return reject(ev.PlayerID, "match already started")
@@ -110,6 +105,57 @@ func (e *Engine) applyLeave(ev LeaveEvent) []Action {
 	return append(actions, e.maybeReveal()...)
 }
 
+func (e *Engine) applyStart(ev StartEvent) []Action {
+	p, ok := e.players[ev.PlayerID]
+	switch {
+	case !ok:
+		return reject(ev.PlayerID, "unknown player")
+	case !p.IsHost:
+		return reject(ev.PlayerID, "only the host can start the match")
+	case e.phase != PhaseLobby:
+		return reject(ev.PlayerID, "match already started")
+	case len(e.order) < e.cfg.MinPlayers:
+		return reject(ev.PlayerID, "need at least %d players to start", e.cfg.MinPlayers)
+	}
+
+	e.locations = e.pick(e.cfg.Rounds)
+	if len(e.locations) < e.cfg.Rounds {
+		return reject(ev.PlayerID, "server has no locations available")
+	}
+	return append([]Action{MatchStartedAction{TotalRounds: e.cfg.Rounds}}, e.beginRound(1)...)
+}
+
+func (e *Engine) applyGuess(ev GuessEvent) []Action {
+	if _, ok := e.players[ev.PlayerID]; !ok {
+		return reject(ev.PlayerID, "unknown player")
+	}
+	if e.phase != PhasePlaying {
+		return reject(ev.PlayerID, "not accepting guesses right now")
+	}
+	if !ev.Guess.Valid() {
+		return reject(ev.PlayerID, "invalid coordinates")
+	}
+
+	e.guesses[e.round][ev.PlayerID] = ev.Guess
+
+	actions := []Action{GuessAcceptedAction{PlayerID: ev.PlayerID, Round: e.round}}
+	return append(actions, e.maybeReveal()...)
+}
+
+func (e *Engine) applyTimeout(ev TimeoutEvent) []Action {
+	switch ev.Tag.Kind {
+	case TimerDeadline:
+		if e.phase == PhasePlaying && ev.Tag.Round == e.round {
+			return e.revealNow()
+		}
+	case TimerReveal:
+		if e.phase == PhaseReveal && ev.Tag.Round == e.round {
+			return e.advanceRound()
+		}
+	}
+	return nil
+}
+
 func (e *Engine) removePlayer(id PlayerID) {
 	for i, oid := range e.order {
 		if oid == id {
@@ -132,26 +178,6 @@ func (e *Engine) removePlayer(id PlayerID) {
 	}
 }
 
-func (e *Engine) applyStart(ev StartEvent) []Action {
-	p, ok := e.players[ev.PlayerID]
-	switch {
-	case !ok:
-		return reject(ev.PlayerID, "unknown player")
-	case !p.IsHost:
-		return reject(ev.PlayerID, "only the host can start the match")
-	case e.phase != PhaseLobby:
-		return reject(ev.PlayerID, "match already started")
-	case len(e.order) < e.cfg.MinPlayers:
-		return reject(ev.PlayerID, "need at least %d players to start", e.cfg.MinPlayers)
-	}
-
-	e.locations = e.pick(e.cfg.Rounds)
-	if len(e.locations) < e.cfg.Rounds {
-		return reject(ev.PlayerID, "server has no locations available")
-	}
-	return append([]Action{MatchStartedAction{TotalRounds: e.cfg.Rounds}}, e.beginRound(1)...)
-}
-
 func (e *Engine) beginRound(round int) []Action {
 	e.round = round
 	e.phase = PhasePlaying
@@ -170,23 +196,6 @@ func (e *Engine) beginRound(round int) []Action {
 		},
 		TimerScheduledAction{Tag: TimerTag{Kind: TimerDeadline, Round: round}, Delay: e.cfg.RoundTime},
 	}
-}
-
-func (e *Engine) applyGuess(ev GuessEvent) []Action {
-	if _, ok := e.players[ev.PlayerID]; !ok {
-		return reject(ev.PlayerID, "unknown player")
-	}
-	if e.phase != PhasePlaying {
-		return reject(ev.PlayerID, "not accepting guesses right now")
-	}
-	if !ev.Guess.Valid() {
-		return reject(ev.PlayerID, "invalid coordinates")
-	}
-
-	e.guesses[e.round][ev.PlayerID] = ev.Guess
-
-	actions := []Action{GuessAcceptedAction{PlayerID: ev.PlayerID, Round: e.round}}
-	return append(actions, e.maybeReveal()...)
 }
 
 func (e *Engine) maybeReveal() []Action {
@@ -235,20 +244,6 @@ func (e *Engine) revealNow() []Action {
 	}
 }
 
-func (e *Engine) applyTimeout(ev TimeoutEvent) []Action {
-	switch ev.Tag.Kind {
-	case TimerDeadline:
-		if e.phase == PhasePlaying && ev.Tag.Round == e.round {
-			return e.revealNow()
-		}
-	case TimerReveal:
-		if e.phase == PhaseReveal && ev.Tag.Round == e.round {
-			return e.advanceRound()
-		}
-	}
-	return nil
-}
-
 func (e *Engine) advanceRound() []Action {
 	if e.round >= e.cfg.Rounds {
 		e.phase = PhaseFinished
@@ -286,4 +281,8 @@ func sortResultsByScore(results []RoundResult, order []PlayerID) {
 		}
 		return cmp.Compare(rank[a.PlayerID], rank[b.PlayerID])
 	})
+}
+
+func reject(id PlayerID, format string, args ...any) []Action {
+	return []Action{RejectedAction{PlayerID: id, Reason: fmt.Sprintf(format, args...)}}
 }

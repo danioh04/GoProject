@@ -70,27 +70,6 @@ type AttachOutcome struct {
 	PlayerID string
 }
 
-type command any
-
-type attachCommand struct {
-	session  *wsutil.Session
-	nickname string
-	reply    chan AttachOutcome
-}
-
-type inboundCommand struct {
-	playerID game.PlayerID
-	env      wsutil.Envelope
-}
-
-type disconnectCommand struct {
-	playerID game.PlayerID
-}
-
-type timeoutCommand struct {
-	tag game.TimerTag
-}
-
 type Room struct {
 	id       string
 	joinCode string
@@ -135,6 +114,69 @@ func Start(opts Options) *Room {
 	r.publish()
 	go r.run()
 	return r
+}
+
+func (r *Room) Attach(session *wsutil.Session, nickname string) AttachOutcome {
+	cmd := attachCommand{session: session, nickname: nickname, reply: make(chan AttachOutcome, 1)}
+	if !r.deliver(cmd) {
+		return AttachOutcome{Reason: "room closed"}
+	}
+	select {
+	case out := <-cmd.reply:
+		return out
+	case <-r.done:
+		return AttachOutcome{Reason: "room closed"}
+	}
+}
+
+func (r *Room) NotifyInbound(playerID string, env wsutil.Envelope) {
+	r.deliver(inboundCommand{playerID: game.PlayerID(playerID), env: env})
+}
+
+func (r *Room) NotifyDisconnect(playerID string) {
+	r.deliver(disconnectCommand{playerID: game.PlayerID(playerID)})
+}
+
+func (r *Room) Snapshot() Snapshot {
+	return *r.snapshot.Load()
+}
+
+func (r *Room) Done() <-chan struct{} {
+	return r.done
+}
+
+func (r *Room) Close() {
+	r.closeMu.Lock()
+	if r.closed {
+		r.closeMu.Unlock()
+		return
+	}
+	r.closed = true
+	r.closeMu.Unlock()
+	close(r.commands)
+}
+
+// --- Internal Actor Commands & Loop ---
+
+type command any
+
+type attachCommand struct {
+	session  *wsutil.Session
+	nickname string
+	reply    chan AttachOutcome
+}
+
+type inboundCommand struct {
+	playerID game.PlayerID
+	env      wsutil.Envelope
+}
+
+type disconnectCommand struct {
+	playerID game.PlayerID
+}
+
+type timeoutCommand struct {
+	tag game.TimerTag
 }
 
 func (r *Room) run() {
@@ -320,14 +362,6 @@ func (r *Room) flushMatch(standings []game.Standing, rounds []FinishedRound) {
 	}()
 }
 
-func newMatchID() string {
-	var b [12]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return time.Now().UTC().Format("20060102T150405.000000000")
-	}
-	return hex.EncodeToString(b[:])
-}
-
 func (r *Room) stopTimers() {
 	for kind, t := range r.timers {
 		t.Stop()
@@ -347,73 +381,6 @@ func (r *Room) publishClosed() {
 		PlayerCount:  0,
 		HostNickname: hostNick,
 	})
-}
-
-func (r *Room) broadcastRoster() {
-	env, _ := wsutil.NewEnvelope(wsutil.TypeRoster, rosterPayload{Players: r.engine.Roster()})
-	r.broadcast(env)
-}
-
-func (r *Room) broadcast(env wsutil.Envelope) {
-	for _, session := range r.sessions {
-		if !session.Send(env) {
-			session.Kick()
-		}
-	}
-}
-
-func (r *Room) Attach(session *wsutil.Session, nickname string) AttachOutcome {
-	cmd := attachCommand{session: session, nickname: nickname, reply: make(chan AttachOutcome, 1)}
-	if !r.deliver(cmd) {
-		return AttachOutcome{Reason: "room closed"}
-	}
-	select {
-	case out := <-cmd.reply:
-		return out
-	case <-r.done:
-		return AttachOutcome{Reason: "room closed"}
-	}
-}
-
-func (r *Room) NotifyInbound(playerID string, env wsutil.Envelope) {
-	r.deliver(inboundCommand{playerID: game.PlayerID(playerID), env: env})
-}
-
-func (r *Room) NotifyDisconnect(playerID string) {
-	r.deliver(disconnectCommand{playerID: game.PlayerID(playerID)})
-}
-
-func (r *Room) Close() {
-	r.closeMu.Lock()
-	if r.closed {
-		r.closeMu.Unlock()
-		return
-	}
-	r.closed = true
-	r.closeMu.Unlock()
-	close(r.commands)
-}
-
-func (r *Room) Done() <-chan struct{} {
-	return r.done
-}
-
-func (r *Room) Snapshot() Snapshot {
-	return *r.snapshot.Load()
-}
-
-func (r *Room) deliver(cmd command) bool {
-	r.closeMu.RLock()
-	defer r.closeMu.RUnlock()
-	if r.closed {
-		return false
-	}
-	select {
-	case r.commands <- cmd:
-		return true
-	case <-r.done:
-		return false
-	}
 }
 
 func (r *Room) publish() {
@@ -443,6 +410,35 @@ func (r *Room) publish() {
 		HostNickname: hostNick,
 	})
 }
+
+func (r *Room) broadcastRoster() {
+	env, _ := wsutil.NewEnvelope(wsutil.TypeRoster, rosterPayload{Players: r.engine.Roster()})
+	r.broadcast(env)
+}
+
+func (r *Room) broadcast(env wsutil.Envelope) {
+	for _, session := range r.sessions {
+		if !session.Send(env) {
+			session.Kick()
+		}
+	}
+}
+
+func (r *Room) deliver(cmd command) bool {
+	r.closeMu.RLock()
+	defer r.closeMu.RUnlock()
+	if r.closed {
+		return false
+	}
+	select {
+	case r.commands <- cmd:
+		return true
+	case <-r.done:
+		return false
+	}
+}
+
+// --- Wire Payloads & Helpers ---
 
 type joinedPayload struct {
 	PlayerID string `json:"player_id"`
@@ -501,4 +497,12 @@ func newPlayerID() (game.PlayerID, error) {
 		return "", err
 	}
 	return game.PlayerID(hex.EncodeToString(b[:])), nil
+}
+
+func newMatchID() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return time.Now().UTC().Format("20060102T150405.000000000")
+	}
+	return hex.EncodeToString(b[:])
 }

@@ -21,18 +21,6 @@ const (
 	PhaseFinished Phase = "finished"
 )
 
-type TimerKind string
-
-const (
-	TimerDeadline TimerKind = "deadline"
-	TimerReveal   TimerKind = "reveal"
-)
-
-type TimerTag struct {
-	Kind  TimerKind
-	Round int
-}
-
 type LatLng struct {
 	Lat float64 `json:"lat"`
 	Lng float64 `json:"lng"`
@@ -60,6 +48,25 @@ type Standing struct {
 	PlayerID PlayerID `json:"player_id"`
 	Nickname string   `json:"nickname"`
 	Total    int      `json:"total"`
+}
+
+type FinishedRound struct {
+	Round      int           `json:"round"`
+	LocationID string        `json:"location_id"`
+	Target     LatLng        `json:"target"`
+	Results    []RoundResult `json:"results"`
+}
+
+type TimerKind string
+
+const (
+	TimerDeadline TimerKind = "deadline"
+	TimerReveal   TimerKind = "reveal"
+)
+
+type TimerTag struct {
+	Kind  TimerKind
+	Round int
 }
 
 type Config struct {
@@ -99,27 +106,25 @@ type JoinEvent struct {
 	Nickname string
 }
 
-type LeaveEvent struct {
-	PlayerID PlayerID
-}
+func (e JoinEvent) kind() eventType { return evJoin }
 
-type StartEvent struct {
-	PlayerID PlayerID
-}
+type LeaveEvent struct{ PlayerID PlayerID }
+
+func (e LeaveEvent) kind() eventType { return evLeave }
+
+type StartEvent struct{ PlayerID PlayerID }
+
+func (e StartEvent) kind() eventType { return evStart }
 
 type GuessEvent struct {
 	PlayerID PlayerID
 	Guess    LatLng
 }
 
-type TimeoutEvent struct {
-	Tag TimerTag
-}
+func (e GuessEvent) kind() eventType { return evGuess }
 
-func (e JoinEvent) kind() eventType    { return evJoin }
-func (e LeaveEvent) kind() eventType   { return evLeave }
-func (e StartEvent) kind() eventType   { return evStart }
-func (e GuessEvent) kind() eventType   { return evGuess }
+type TimeoutEvent struct{ Tag TimerTag }
+
 func (e TimeoutEvent) kind() eventType { return evTimeout }
 
 type Action interface{ actionKind() actionType }
@@ -144,16 +149,22 @@ type PlayerJoinedAction struct {
 	Host     bool
 }
 
+func (a PlayerJoinedAction) actionKind() actionType { return actPlayerJoined }
+
 type RejectedAction struct {
 	PlayerID PlayerID
 	Reason   string
 }
 
+func (a RejectedAction) actionKind() actionType { return actRejected }
+
 type RosterChangedAction struct{}
 
-type MatchStartedAction struct {
-	TotalRounds int
-}
+func (a RosterChangedAction) actionKind() actionType { return actRosterChanged }
+
+type MatchStartedAction struct{ TotalRounds int }
+
+func (a MatchStartedAction) actionKind() actionType { return actMatchStarted }
 
 type RoundStartedAction struct {
 	Round        int
@@ -163,10 +174,14 @@ type RoundStartedAction struct {
 	RoundSeconds int
 }
 
+func (a RoundStartedAction) actionKind() actionType { return actRoundStarted }
+
 type GuessAcceptedAction struct {
 	PlayerID PlayerID
 	Round    int
 }
+
+func (a GuessAcceptedAction) actionKind() actionType { return actGuessAccepted }
 
 type RoundRevealedAction struct {
 	Round   int
@@ -174,32 +189,22 @@ type RoundRevealedAction struct {
 	Results []RoundResult
 }
 
-type FinishedRound struct {
-	Round      int           `json:"round"`
-	LocationID string        `json:"location_id"`
-	Target     LatLng        `json:"target"`
-	Results    []RoundResult `json:"results"`
-}
+func (a RoundRevealedAction) actionKind() actionType { return actRoundRevealed }
 
 type MatchEndedAction struct {
 	Standings []Standing
 	Rounds    []FinishedRound
 }
 
+func (a MatchEndedAction) actionKind() actionType { return actMatchEnded }
+
 type TimerScheduledAction struct {
 	Tag   TimerTag
 	Delay time.Duration
 }
 
+func (a TimerScheduledAction) actionKind() actionType { return actTimerScheduled }
+
 type RoomEmptyAction struct{}
 
-func (a PlayerJoinedAction) actionKind() actionType   { return actPlayerJoined }
-func (a RejectedAction) actionKind() actionType       { return actRejected }
-func (a RosterChangedAction) actionKind() actionType  { return actRosterChanged }
-func (a MatchStartedAction) actionKind() actionType   { return actMatchStarted }
-func (a RoundStartedAction) actionKind() actionType   { return actRoundStarted }
-func (a GuessAcceptedAction) actionKind() actionType  { return actGuessAccepted }
-func (a RoundRevealedAction) actionKind() actionType  { return actRoundRevealed }
-func (a MatchEndedAction) actionKind() actionType     { return actMatchEnded }
-func (a TimerScheduledAction) actionKind() actionType { return actTimerScheduled }
-func (a RoomEmptyAction) actionKind() actionType      { return actRoomEmpty }
+func (a RoomEmptyAction) actionKind() actionType { return actRoomEmpty }

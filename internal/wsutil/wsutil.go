@@ -131,6 +131,23 @@ func NewSession(conn Conn, cfg SessionConfig) *Session {
 	}
 }
 
+// Run starts concurrent read and write loops, blocking until both terminate.
+func (s *Session) Run(onMessage func(Envelope), onClose func()) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.readPump(onMessage)
+	}()
+	s.writePump()
+	wg.Wait()
+	s.teardown()
+	if onClose != nil {
+		onClose()
+	}
+}
+
+// Send attempts to enqueue an envelope to be written to the WebSocket.
 func (s *Session) Send(env Envelope) bool {
 	select {
 	case <-s.done:
@@ -145,30 +162,9 @@ func (s *Session) Send(env Envelope) bool {
 	}
 }
 
+// Kick closes the session and tears down the connection.
 func (s *Session) Kick() {
 	s.teardown()
-}
-
-func (s *Session) teardown() {
-	s.teardownOnce.Do(func() {
-		close(s.done)
-		s.conn.CloseNow()
-	})
-}
-
-func (s *Session) Run(onMessage func(Envelope), onClose func()) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		s.readPump(onMessage)
-	}()
-	s.writePump()
-	wg.Wait()
-	s.teardown()
-	if onClose != nil {
-		onClose()
-	}
 }
 
 func (s *Session) readPump(onMessage func(Envelope)) {
@@ -218,4 +214,11 @@ func (s *Session) writePump() {
 			return
 		}
 	}
+}
+
+func (s *Session) teardown() {
+	s.teardownOnce.Do(func() {
+		close(s.done)
+		s.conn.CloseNow()
+	})
 }

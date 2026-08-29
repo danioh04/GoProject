@@ -28,6 +28,13 @@ type Persistence interface {
 	GameDetail(ctx context.Context, id string) (*store.GameDetail, error)
 }
 
+type server struct {
+	logger           *slog.Logger
+	rooms            *hub.Hub
+	stats            Persistence
+	googleMapsAPIKey string
+}
+
 func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence, googleMapsAPIKey ...string) http.Handler {
 	var key string
 	if len(googleMapsAPIKey) > 0 {
@@ -46,60 +53,6 @@ func New(logger *slog.Logger, rooms *hub.Hub, persistence Persistence, googleMap
 	mux.HandleFunc("GET /v1/games/{id}", s.handleGameDetail)
 
 	return logRequests(logger)(requestIDs(recoverPanics(logger)(mux)))
-}
-
-type server struct {
-	logger           *slog.Logger
-	rooms            *hub.Hub
-	stats            Persistence
-	googleMapsAPIKey string
-}
-
-func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"google_maps_api_key": s.googleMapsAPIKey,
-	})
-}
-
-func (s *server) handleHardestLocations(w http.ResponseWriter, r *http.Request) {
-	if s.stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
-		return
-	}
-	limit := 10
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 50 {
-			writeErr(w, http.StatusBadRequest, "limit must be between 1 and 50")
-			return
-		}
-		limit = parsed
-	}
-	stats, err := s.stats.HardestLocations(r.Context(), limit)
-	if err != nil {
-		s.logger.Error("hardest locations query failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "stats unavailable")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"locations": stats})
-}
-
-func (s *server) handleGameDetail(w http.ResponseWriter, r *http.Request) {
-	if s.stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
-		return
-	}
-	detail, err := s.stats.GameDetail(r.Context(), r.PathValue("id"))
-	if errors.Is(err, store.ErrNotFound) {
-		writeErr(w, http.StatusNotFound, "game not found")
-		return
-	}
-	if err != nil {
-		s.logger.Error("game detail query failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "game lookup failed")
-		return
-	}
-	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -123,8 +76,10 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-type createRoomRequest struct {
-	Nickname string `json:"nickname"`
+func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"google_maps_api_key": s.googleMapsAPIKey,
+	})
 }
 
 func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +159,53 @@ func (s *server) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, room.Snapshot())
+}
+
+func (s *server) handleHardestLocations(w http.ResponseWriter, r *http.Request) {
+	if s.stats == nil {
+		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
+		return
+	}
+	limit := 10
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 50 {
+			writeErr(w, http.StatusBadRequest, "limit must be between 1 and 50")
+			return
+		}
+		limit = parsed
+	}
+	stats, err := s.stats.HardestLocations(r.Context(), limit)
+	if err != nil {
+		s.logger.Error("hardest locations query failed", "error", err)
+		writeErr(w, http.StatusInternalServerError, "stats unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"locations": stats})
+}
+
+func (s *server) handleGameDetail(w http.ResponseWriter, r *http.Request) {
+	if s.stats == nil {
+		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
+		return
+	}
+	detail, err := s.stats.GameDetail(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "game not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("game detail query failed", "error", err)
+		writeErr(w, http.StatusInternalServerError, "game lookup failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// --- Request DTOs & Encoding Helpers ---
+
+type createRoomRequest struct {
+	Nickname string `json:"nickname"`
 }
 
 func normalizeNickname(raw string) (string, bool) {

@@ -111,6 +111,20 @@ func (h *Hub) Shutdown(wait time.Duration) int {
 	return closed
 }
 
+// ValidJoinCode reports whether code matches the expected join code format and charset.
+func ValidJoinCode(code string) bool {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if len(code) != codeLen {
+		return false
+	}
+	for _, c := range code {
+		if !strings.ContainsRune(codeAlphabet, c) {
+			return false
+		}
+	}
+	return true
+}
+
 func generateCode() string {
 	var out [codeLen]byte
 	for i := range out {
@@ -125,17 +139,4 @@ func generateID() string {
 		return time.Now().UTC().Format("20060102150405.000000000")[:24]
 	}
 	return hex.EncodeToString(b[:])
-}
-
-func ValidJoinCode(code string) bool {
-	code = strings.ToUpper(strings.TrimSpace(code))
-	if len(code) != codeLen {
-		return false
-	}
-	for _, c := range code {
-		if !strings.ContainsRune(codeAlphabet, c) {
-			return false
-		}
-	}
-	return true
 }

@@ -10,6 +10,23 @@ import (
 	"os"
 )
 
+// Map holds parsed geographic boundary polygons and samplers.
+type Map struct {
+	Name     string
+	Polygons []Polygon
+}
+
+type Ring []game.LatLng
+
+type Polygon struct {
+	Exterior Ring
+	Holes    []Ring
+	MinLat   float64
+	MaxLat   float64
+	MinLng   float64
+	MaxLng   float64
+}
+
 // GeoJSON RFC 7946 Structures
 type FeatureCollection struct {
 	Type     string    `json:"type"`
@@ -24,23 +41,6 @@ type Feature struct {
 type Geometry struct {
 	Type        string          `json:"type"`
 	Coordinates json.RawMessage `json:"coordinates"`
-}
-
-type Ring []game.LatLng
-
-type Polygon struct {
-	Exterior Ring
-	Holes    []Ring
-	MinLat   float64
-	MaxLat   float64
-	MinLng   float64
-	MaxLng   float64
-}
-
-// Map holds parsed geographic boundary polygons and samplers.
-type Map struct {
-	Name     string
-	Polygons []Polygon
 }
 
 // LoadMap reads a GeoJSON map from a file path. Returns nil, nil if path is empty.
@@ -64,6 +64,15 @@ func LoadMap(path string) (*Map, error) {
 	return m, nil
 }
 
+// ParseGeoJSON parses GeoJSON from an io.Reader.
+func ParseGeoJSON(r io.Reader) (*Map, error) {
+	var fc FeatureCollection
+	if err := json.NewDecoder(r).Decode(&fc); err != nil {
+		return nil, fmt.Errorf("decode geojson: %w", err)
+	}
+	return buildMapFromCollection(fc)
+}
+
 // ParseGeoJSONBytes parses GeoJSON byte content.
 func ParseGeoJSONBytes(data []byte) (*Map, error) {
 	var fc FeatureCollection
@@ -73,13 +82,83 @@ func ParseGeoJSONBytes(data []byte) (*Map, error) {
 	return buildMapFromCollection(fc)
 }
 
-// ParseGeoJSON parses GeoJSON from an io.Reader.
-func ParseGeoJSON(r io.Reader) (*Map, error) {
-	var fc FeatureCollection
-	if err := json.NewDecoder(r).Decode(&fc); err != nil {
-		return nil, fmt.Errorf("decode geojson: %w", err)
+// Sample generates a random valid coordinate within the map's boundary polygons using Ray-Casting PIP.
+func (m *Map) Sample(rnd *mrand.Rand) game.LatLng {
+	if len(m.Polygons) == 0 {
+		return ProceduralCoordinate(rnd)
 	}
-	return buildMapFromCollection(fc)
+
+	var poly Polygon
+	if rnd != nil {
+		poly = m.Polygons[rnd.IntN(len(m.Polygons))]
+	} else {
+		poly = m.Polygons[mrand.IntN(len(m.Polygons))]
+	}
+
+	latRange := poly.MaxLat - poly.MinLat
+	lngRange := poly.MaxLng - poly.MinLng
+
+	// Ray-casting rejection sampling
+	for attempts := 0; attempts < 30; attempts++ {
+		var rLat, rLng float64
+		if rnd != nil {
+			rLat = poly.MinLat + rnd.Float64()*latRange
+			rLng = poly.MinLng + rnd.Float64()*lngRange
+		} else {
+			rLat = poly.MinLat + mrand.Float64()*latRange
+			rLng = poly.MinLng + mrand.Float64()*lngRange
+		}
+
+		candidate := game.LatLng{Lat: rLat, Lng: rLng}
+		if poly.Contains(candidate) {
+			return candidate
+		}
+	}
+
+	// Fallback to polygon centroid if rejection sampling timed out
+	return poly.Centroid()
+}
+
+// Contains checks if point is inside exterior ring and outside all interior holes (Ray-Casting Algorithm).
+func (p *Polygon) Contains(pt game.LatLng) bool {
+	if pt.Lat < p.MinLat || pt.Lat > p.MaxLat || pt.Lng < p.MinLng || pt.Lng > p.MaxLng {
+		return false
+	}
+
+	if !pointInRing(pt, p.Exterior) {
+		return false
+	}
+
+	for _, hole := range p.Holes {
+		if pointInRing(pt, hole) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Centroid returns the bounding center of the polygon.
+func (p *Polygon) Centroid() game.LatLng {
+	return game.LatLng{
+		Lat: (p.MinLat + p.MaxLat) / 2.0,
+		Lng: (p.MinLng + p.MaxLng) / 2.0,
+	}
+}
+
+// ProceduralCoordinate generates a completely dynamic, non-hardcoded global coordinate.
+func ProceduralCoordinate(rnd *mrand.Rand) game.LatLng {
+	// Sample across inhabited global land latitudes (-50 to +65) and longitudes (-180 to +180)
+	var lat, lng float64
+	if rnd != nil {
+		lat = -50.0 + rnd.Float64()*115.0
+		lng = -180.0 + rnd.Float64()*360.0
+	} else {
+		lat = -50.0 + mrand.Float64()*115.0
+		lng = -180.0 + mrand.Float64()*360.0
+	}
+
+	return game.LatLng{Lat: lat, Lng: lng}
 }
 
 func buildMapFromCollection(fc FeatureCollection) (*Map, error) {
@@ -203,86 +282,6 @@ func ringToFloats(ring Ring) [][]float64 {
 	return out
 }
 
-// Sample generates a random valid coordinate within the map's boundary polygons using Ray-Casting PIP.
-func (m *Map) Sample(rnd *mrand.Rand) game.LatLng {
-	if len(m.Polygons) == 0 {
-		return ProceduralCoordinate(rnd)
-	}
-
-	var poly Polygon
-	if rnd != nil {
-		poly = m.Polygons[rnd.IntN(len(m.Polygons))]
-	} else {
-		poly = m.Polygons[mrand.IntN(len(m.Polygons))]
-	}
-
-	latRange := poly.MaxLat - poly.MinLat
-	lngRange := poly.MaxLng - poly.MinLng
-
-	// Ray-casting rejection sampling
-	for attempts := 0; attempts < 30; attempts++ {
-		var rLat, rLng float64
-		if rnd != nil {
-			rLat = poly.MinLat + rnd.Float64()*latRange
-			rLng = poly.MinLng + rnd.Float64()*lngRange
-		} else {
-			rLat = poly.MinLat + mrand.Float64()*latRange
-			rLng = poly.MinLng + mrand.Float64()*lngRange
-		}
-
-		candidate := game.LatLng{Lat: rLat, Lng: rLng}
-		if poly.Contains(candidate) {
-			return candidate
-		}
-	}
-
-	// Fallback to polygon centroid if rejection sampling timed out
-	return poly.Centroid()
-}
-
-// ProceduralCoordinate generates a completely dynamic, non-hardcoded global coordinate.
-func ProceduralCoordinate(rnd *mrand.Rand) game.LatLng {
-	// Sample across inhabited global land latitudes (-50 to +65) and longitudes (-180 to +180)
-	var lat, lng float64
-	if rnd != nil {
-		lat = -50.0 + rnd.Float64()*115.0
-		lng = -180.0 + rnd.Float64()*360.0
-	} else {
-		lat = -50.0 + mrand.Float64()*115.0
-		lng = -180.0 + mrand.Float64()*360.0
-	}
-
-	return game.LatLng{Lat: lat, Lng: lng}
-}
-
-// Contains checks if point is inside exterior ring and outside all interior holes (Ray-Casting Algorithm).
-func (p *Polygon) Contains(pt game.LatLng) bool {
-	if pt.Lat < p.MinLat || pt.Lat > p.MaxLat || pt.Lng < p.MinLng || pt.Lng > p.MaxLng {
-		return false
-	}
-
-	if !pointInRing(pt, p.Exterior) {
-		return false
-	}
-
-	for _, hole := range p.Holes {
-		if pointInRing(pt, hole) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// Centroid returns the bounding center of the polygon.
-func (p *Polygon) Centroid() game.LatLng {
-	return game.LatLng{
-		Lat: (p.MinLat + p.MaxLat) / 2.0,
-		Lng: (p.MinLng + p.MaxLng) / 2.0,
-	}
-}
-
-// pointInRing implements standard ray-casting Point-in-Polygon (PIP) testing.
 func pointInRing(pt game.LatLng, ring Ring) bool {
 	inside := false
 	n := len(ring)
