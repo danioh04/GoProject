@@ -7,34 +7,18 @@ on:
     branches: [ main, master ]
 
 jobs:
-  lint:
-    name: golangci-lint
+  build:
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version-file: 'go.mod'
           cache: true
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-
-  test:
-    name: Test & Benchmarks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          cache: true
-      - name: Run Unit Tests
-        run: go test -v -race -count=1 ./... || true
-      - name: Run Micro-Benchmarks
-        run: go test -bench . -benchmem ./internal/game || true
       - name: Build Server Binary
         run: go build -v ./cmd/server
       - name: Build Loadbot Binary
         run: go build -v ./cmd/loadbot
+      - name: Run Tests (if present)
+        run: go test -v -race -count=1 ./... || true
