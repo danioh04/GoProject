@@ -187,10 +187,9 @@ func (p *Pool) Close() {
 }
 
 func (p *Pool) startWorkers(count int) {
-	for i := range count {
+	for range count {
 		p.wg.Add(1)
 		go func() {
-			var _ int = i
 			p.workerLoop()
 		}()
 	}
