@@ -1,4 +1,3 @@
-// Package hub maps join codes to active room actors.
 package hub
 
 import (
@@ -110,7 +109,6 @@ func (h *Hub) Shutdown(wait time.Duration) int {
 	return closed
 }
 
-// ValidJoinCode reports whether code matches the expected join code format and charset.
 func ValidJoinCode(code string) bool {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if len(code) != codeLen {

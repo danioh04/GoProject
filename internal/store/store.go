@@ -1,4 +1,3 @@
-// Package store persists finished games and aggregates results.
 package store
 
 import (
@@ -9,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed schema.sql
 var schemaSQL string
 
 type Store struct {

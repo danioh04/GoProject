@@ -1,4 +1,3 @@
-// Package randutil provides cryptographically secure pseudo-random generators.
 package randutil
 
 import (
@@ -7,8 +6,6 @@ import (
 	mrand "math/rand/v2"
 )
 
-// Hex generates a cryptographically secure random hexadecimal string of 2*byteLen characters.
-// If crypto/rand fails, it falls back to math/rand/v2 to strictly preserve hexadecimal format and length.
 func Hex(byteLen int) string {
 	if byteLen <= 0 {
 		byteLen = 8

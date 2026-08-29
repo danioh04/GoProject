@@ -39,7 +39,7 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	batch := &pgx.Batch{}
 

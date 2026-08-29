@@ -1,0 +1,27 @@
+run:
+  timeout: 5m
+  go: "1.26"
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - exhaustive
+    - sqlclosecheck
+    - rowserrcheck
+    - errcheck
+    - bodyclose
+    - errorlint
+    - gosec
+    - noctx
+
+linters-settings:
+  exhaustive:
+    default-signifies-exhaustive: true
+    package-based: true
+
+  gosec:
+    excludes:
+      - G404
+      - G108

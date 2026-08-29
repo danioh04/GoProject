@@ -1,6 +1,3 @@
-// Package room bridges WebSocket sessions and the game engine: it translates
-// transport events into engine inputs, executes engine actions, and owns
-// connection lifecycle, timers, and persistence.
 package room
 
 import (
@@ -101,7 +98,7 @@ func Start(opts Options) *Room {
 		joinCode: opts.JoinCode,
 		label:    opts.Label,
 		logger:   opts.Logger,
-		engine:   game.New(opts.Config, time.Now, opts.Picker),
+		engine:   game.New(opts.Config, opts.Picker),
 		sessions: make(map[game.PlayerID]*wsutil.Session),
 		timers:   make(map[game.TimerKind]*time.Timer),
 		store:    opts.Store,
@@ -152,8 +149,6 @@ func (r *Room) Close() {
 	r.closeMu.Unlock()
 	close(r.commands)
 }
-
-// --- Internal Actor Commands & Loop ---
 
 type command any
 
@@ -426,8 +421,6 @@ func (r *Room) deliver(cmd command) bool {
 		return false
 	}
 }
-
-// --- Wire Payloads & Helpers ---
 
 type joinedPayload struct {
 	PlayerID string `json:"player_id"`

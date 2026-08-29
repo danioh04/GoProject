@@ -1,5 +1,3 @@
-// Package wsutil provides WebSocket upgrades, read/write pumps, message
-// envelopes, and per-connection sessions with bounded outbound buffers.
 package wsutil
 
 import (
@@ -92,10 +90,10 @@ func WriteEnvelope(ctx context.Context, conn Conn, env Envelope) error {
 func WriteError(ctx context.Context, conn Conn, msg string) {
 	env, _ := NewEnvelope(TypeError, map[string]string{"error": msg})
 	if err := WriteEnvelope(ctx, conn, env); err != nil {
-		conn.CloseNow()
+		_ = conn.CloseNow()
 		return
 	}
-	conn.Close(websocket.StatusPolicyViolation, msg)
+	_ = conn.Close(websocket.StatusPolicyViolation, msg)
 }
 
 type SessionConfig struct {
@@ -130,7 +128,6 @@ func NewSession(conn Conn, cfg SessionConfig) *Session {
 	}
 }
 
-// Run starts concurrent read and write loops, blocking until both terminate.
 func (s *Session) Run(onMessage func(Envelope), onClose func()) {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -146,7 +143,6 @@ func (s *Session) Run(onMessage func(Envelope), onClose func()) {
 	}
 }
 
-// Send attempts to enqueue an envelope to be written to the WebSocket.
 func (s *Session) Send(env Envelope) bool {
 	select {
 	case <-s.done:
@@ -161,7 +157,6 @@ func (s *Session) Send(env Envelope) bool {
 	}
 }
 
-// Kick closes the session and tears down the connection.
 func (s *Session) Kick() {
 	s.teardown()
 }
@@ -207,7 +202,7 @@ func (s *Session) writePump() {
 				return
 			}
 		case <-s.done:
-			s.conn.Close(websocket.StatusNormalClosure, "")
+			_ = s.conn.Close(websocket.StatusNormalClosure, "")
 			return
 		}
 	}
@@ -216,6 +211,6 @@ func (s *Session) writePump() {
 func (s *Session) teardown() {
 	s.teardownOnce.Do(func() {
 		close(s.done)
-		s.conn.CloseNow()
+		_ = s.conn.CloseNow()
 	})
 }

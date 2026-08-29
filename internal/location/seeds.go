@@ -5,22 +5,11 @@ import (
 	mrand "math/rand/v2"
 )
 
-// GlobalAnchorCoordinate returns a realistic, Street View-covered anchor coordinate with randomized jitter.
-// This ensures discovery workers achieve a >90% hit rate with the Google Street View API,
-// while providing boundless regional variety.
-func GlobalAnchorCoordinate(rnd *mrand.Rand) game.LatLng {
-	intN := mrand.IntN
-	float64Rnd := mrand.Float64
-	if rnd != nil {
-		intN = rnd.IntN
-		float64Rnd = rnd.Float64
-	}
+func GlobalAnchorCoordinate() game.LatLng {
+	anchor := globalSeeds[mrand.IntN(len(globalSeeds))]
 
-	anchor := globalSeeds[intN(len(globalSeeds))]
-
-	// Jitter ±0.08° (~9 km) around the anchor hub
-	jLat := (float64Rnd()*2.0 - 1.0) * 0.08
-	jLng := (float64Rnd()*2.0 - 1.0) * 0.08
+	jLat := (mrand.Float64()*2.0 - 1.0) * 0.08
+	jLng := (mrand.Float64()*2.0 - 1.0) * 0.08
 
 	cand := game.LatLng{Lat: anchor.Lat + jLat, Lng: anchor.Lng + jLng}
 	if cand.Valid() {
@@ -29,9 +18,7 @@ func GlobalAnchorCoordinate(rnd *mrand.Rand) game.LatLng {
 	return anchor
 }
 
-// Curated global anchor hubs covering countries and metro areas with confirmed Google Street View coverage.
 var globalSeeds = []game.LatLng{
-	// --- North America: USA ---
 	{Lat: 40.7128, Lng: -74.0060},  // New York, NY
 	{Lat: 34.0522, Lng: -118.2437}, // Los Angeles, CA
 	{Lat: 41.8781, Lng: -87.6298},  // Chicago, IL
@@ -60,7 +47,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: 21.3069, Lng: -157.8583}, // Honolulu, HI
 	{Lat: 61.2181, Lng: -149.9003}, // Anchorage, AK
 
-	// --- North America: Canada ---
 	{Lat: 43.6532, Lng: -79.3832},  // Toronto, ON
 	{Lat: 45.5017, Lng: -73.5673},  // Montreal, QC
 	{Lat: 49.2827, Lng: -123.1207}, // Vancouver, BC
@@ -72,7 +58,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: 46.8139, Lng: -71.2080},  // Quebec City, QC
 	{Lat: 48.4284, Lng: -123.3656}, // Victoria, BC
 
-	// --- North America: Mexico ---
 	{Lat: 19.4326, Lng: -99.1332},  // Mexico City
 	{Lat: 20.6597, Lng: -103.3496}, // Guadalajara
 	{Lat: 25.6866, Lng: -100.3161}, // Monterrey
@@ -84,7 +69,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: 20.5888, Lng: -100.3899}, // Querétaro
 	{Lat: 17.0732, Lng: -96.7266},  // Oaxaca
 
-	// --- Europe: Western & Northern ---
 	{Lat: 51.5074, Lng: -0.1278},  // London, UK
 	{Lat: 53.4808, Lng: -2.2426},  // Manchester, UK
 	{Lat: 55.9533, Lng: -3.1883},  // Edinburgh, UK
@@ -117,7 +101,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: 60.1699, Lng: 24.9384},  // Helsinki, Finland
 	{Lat: 64.1466, Lng: -21.9426}, // Reykjavik, Iceland
 
-	// --- Europe: Southern & Eastern ---
 	{Lat: 40.4168, Lng: -3.7038}, // Madrid, Spain
 	{Lat: 41.3879, Lng: 2.1699},  // Barcelona, Spain
 	{Lat: 39.4699, Lng: -0.3763}, // Valencia, Spain
@@ -151,7 +134,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: 54.6872, Lng: 25.2797}, // Vilnius, Lithuania
 	{Lat: 35.8989, Lng: 14.5146}, // Valletta, Malta
 
-	// --- Asia: East & Southeast ---
 	{Lat: 35.6762, Lng: 139.6503}, // Tokyo, Japan
 	{Lat: 34.6937, Lng: 135.5023}, // Osaka, Japan
 	{Lat: 35.0116, Lng: 135.7681}, // Kyoto, Japan
@@ -186,7 +168,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: 19.0760, Lng: 72.8777},  // Mumbai, India
 	{Lat: 12.9716, Lng: 77.5946},  // Bengaluru, India
 
-	// --- Middle East & Central Asia ---
 	{Lat: 25.2048, Lng: 55.2708}, // Dubai, UAE
 	{Lat: 24.4539, Lng: 54.3773}, // Abu Dhabi, UAE
 	{Lat: 25.2854, Lng: 51.5310}, // Doha, Qatar
@@ -198,7 +179,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: 38.4237, Lng: 27.1428}, // Izmir, Turkey
 	{Lat: 36.8969, Lng: 30.7133}, // Antalya, Turkey
 
-	// --- South America ---
 	{Lat: -23.5505, Lng: -46.6333}, // São Paulo, Brazil
 	{Lat: -22.9068, Lng: -43.1729}, // Rio de Janeiro, Brazil
 	{Lat: -15.7975, Lng: -47.8919}, // Brasília, Brazil
@@ -228,7 +208,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: -16.5000, Lng: -68.1500}, // La Paz, Bolivia
 	{Lat: -17.7863, Lng: -63.1812}, // Santa Cruz, Bolivia
 
-	// --- Oceania ---
 	{Lat: -33.8688, Lng: 151.2093}, // Sydney, Australia
 	{Lat: -37.8136, Lng: 144.9631}, // Melbourne, Australia
 	{Lat: -27.4698, Lng: 153.0251}, // Brisbane, Australia
@@ -243,7 +222,6 @@ var globalSeeds = []game.LatLng{
 	{Lat: -43.5321, Lng: 172.6362}, // Christchurch, New Zealand
 	{Lat: -45.0312, Lng: 168.6626}, // Queenstown, New Zealand
 
-	// --- Africa ---
 	{Lat: -33.9249, Lng: 18.4241}, // Cape Town, South Africa
 	{Lat: -26.2041, Lng: 28.0473}, // Johannesburg, South Africa
 	{Lat: -29.8587, Lng: 31.0218}, // Durban, South Africa

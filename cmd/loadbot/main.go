@@ -16,8 +16,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// --- CLI Entry Point ---
-
 func main() {
 	addr := flag.String("addr", "localhost:8080", "server address")
 	rooms := flag.Int("rooms", 10, "concurrent rooms")
@@ -61,8 +59,6 @@ func main() {
 	}
 }
 
-// --- Match Simulation Orchestrator ---
-
 func playMatch(addr string, n, perRoom int, verbose bool) error {
 	code, err := createRoom(addr, fmt.Sprintf("host-%d", n))
 	if err != nil {
@@ -77,7 +73,7 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 	defer func() {
 		for _, b := range bots {
 			if b != nil && b.conn != nil {
-				b.conn.CloseNow()
+				_ = b.conn.CloseNow()
 			}
 		}
 	}()
@@ -220,8 +216,6 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 	return nil
 }
 
-// --- Types & Bot Receiver Methods ---
-
 type envelope struct {
 	Version int             `json:"v"`
 	Type    string          `json:"type"`
@@ -300,11 +294,16 @@ func (b *bot) waitForAny(want ...string) (envelope, bool) {
 	}
 }
 
-// --- HTTP & WebSocket Protocol Helpers ---
-
 func createRoom(addr, nickname string) (string, error) {
+	ctx, cancel := requestCtx()
+	defer cancel()
 	body := strings.NewReader(fmt.Sprintf(`{"nickname":%q}`, nickname))
-	resp, err := http.Post("http://"+addr+"/v1/rooms", "application/json", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/v1/rooms", body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}

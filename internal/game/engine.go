@@ -1,4 +1,3 @@
-// Package game holds the pure, deterministic game state machine and scoring rules.
 package game
 
 import (
@@ -12,7 +11,6 @@ import (
 
 type Engine struct {
 	cfg           Config
-	now           func() time.Time
 	pick          func(int) []Location
 	phase         Phase
 	players       map[PlayerID]*Player
@@ -24,13 +22,9 @@ type Engine struct {
 	roundsHistory []FinishedRound
 }
 
-func New(cfg Config, now func() time.Time, pick func(n int) []Location) *Engine {
-	if now == nil {
-		now = time.Now
-	}
+func New(cfg Config, pick func(n int) []Location) *Engine {
 	return &Engine{
 		cfg:           cfg,
-		now:           now,
 		pick:          pick,
 		phase:         PhaseLobby,
 		players:       make(map[PlayerID]*Player),
@@ -58,7 +52,6 @@ func (e *Engine) Apply(ev Event) []Action {
 }
 
 func (e *Engine) Phase() Phase     { return e.phase }
-func (e *Engine) Round() int       { return e.round }
 func (e *Engine) PlayerCount() int { return len(e.order) }
 
 func (e *Engine) Roster() []Player {
@@ -184,7 +177,7 @@ func (e *Engine) beginRound(round int) []Action {
 	e.guesses[round] = make(map[PlayerID]LatLng)
 
 	loc := e.locations[round-1]
-	deadline := e.now().Add(e.cfg.RoundTime)
+	deadline := time.Now().Add(e.cfg.RoundTime)
 
 	return []Action{
 		RoundStartedAction{

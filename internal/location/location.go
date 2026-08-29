@@ -15,12 +15,11 @@ import (
 
 const (
 	defaultEndpoint     = "https://maps.googleapis.com/maps/api/streetview/metadata"
-	defaultSearchRadius = 50000 // 50km radius for street view coverage
+	defaultSearchRadius = 50000
 	defaultBufferSize   = 50
 	defaultWorkers      = 3
 )
 
-// Pool maintains a pre-warmed background buffer of live discovered Google Street View locations.
 type Pool struct {
 	apiKey     string
 	endpoint   string
@@ -37,47 +36,14 @@ type Pool struct {
 	mu       sync.Mutex
 }
 
-// Option configures the location Pool.
 type Option func(*Pool)
 
-// WithEndpoint overrides the Google Street View API endpoint (useful for mock tests).
-func WithEndpoint(endpoint string) Option {
-	return func(p *Pool) {
-		p.endpoint = endpoint
-	}
-}
-
-// WithHTTPClient overrides the HTTP client.
-func WithHTTPClient(client *http.Client) Option {
-	return func(p *Pool) {
-		p.httpClient = client
-	}
-}
-
-// WithBufferSize sets the pre-warmed location buffer size.
-func WithBufferSize(size int) Option {
-	return func(p *Pool) {
-		if size > 0 {
-			p.buffer = make(chan game.Location, size)
-		}
-	}
-}
-
-// WithLogger sets the logger for location discovery.
 func WithLogger(logger *slog.Logger) Option {
 	return func(p *Pool) {
 		p.logger = logger
 	}
 }
 
-// WithMap sets the GeoJSON map explicitly.
-func WithMap(m *Map) Option {
-	return func(p *Pool) {
-		p.geoMap = m
-	}
-}
-
-// WithMapFile loads the GeoJSON map from a file path.
 func WithMapFile(path string) Option {
 	return func(p *Pool) {
 		if path != "" {
@@ -93,7 +59,6 @@ func WithMapFile(path string) Option {
 	}
 }
 
-// New creates and starts a dynamic Google Street View location discovery pool.
 func New(ctx context.Context, apiKey string, opts ...Option) *Pool {
 	cctx, cancel := context.WithCancel(ctx)
 	p := &Pool{
@@ -115,7 +80,6 @@ func New(ctx context.Context, apiKey string, opts ...Option) *Pool {
 	return p
 }
 
-// Pick returns n distinct locations from the pre-warmed discovery buffer.
 func (p *Pool) Pick(n int) []game.Location {
 	if n <= 0 {
 		return nil
@@ -124,7 +88,6 @@ func (p *Pool) Pick(n int) []game.Location {
 	out := make([]game.Location, 0, n)
 	seen := make(map[string]struct{}, n)
 
-	// First, drain any immediately available locations non-blockingly
 	for len(out) < n {
 		select {
 		case loc := <-p.buffer:
@@ -139,7 +102,6 @@ func (p *Pool) Pick(n int) []game.Location {
 	return out
 
 waitForBuffer:
-	// Live Google Maps mode: wait for background workers or query API directly
 	if p.apiKey != "" {
 		timer := time.NewTimer(300 * time.Millisecond)
 		defer timer.Stop()
@@ -152,7 +114,6 @@ waitForBuffer:
 					out = append(out, loc)
 				}
 			case <-timer.C:
-				// Discover directly if background workers lagged
 				loc, err := p.discoverOne(p.ctx)
 				if err == nil && loc.Valid() {
 					if _, exists := seen[loc.ID]; !exists {
@@ -174,13 +135,12 @@ waitForBuffer:
 		return out
 	}
 
-	// Offline simulation mode: immediately sample simulated coordinates
 	for len(out) < n {
 		var coord game.LatLng
 		if p.geoMap != nil {
-			coord = p.geoMap.Sample(nil)
+			coord = p.geoMap.Sample()
 		} else {
-			coord = ProceduralCoordinate(nil)
+			coord = ProceduralCoordinate()
 		}
 		fallback := simulatedLocation(coord)
 		if _, exists := seen[fallback.ID]; !exists {
@@ -192,14 +152,12 @@ waitForBuffer:
 	return out
 }
 
-// Picker returns a picker closure compatible with game.Engine.
 func (p *Pool) Picker() func(n int) []game.Location {
 	return func(n int) []game.Location {
 		return p.Pick(n)
 	}
 }
 
-// MapName returns the active map name.
 func (p *Pool) MapName() string {
 	if p.geoMap != nil {
 		return p.geoMap.Name
@@ -207,7 +165,6 @@ func (p *Pool) MapName() string {
 	return "procedural"
 }
 
-// Close gracefully terminates background discovery workers.
 func (p *Pool) Close() {
 	p.mu.Lock()
 	if p.isClosed {
@@ -261,16 +218,15 @@ func (p *Pool) workerLoop() {
 func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 	var coord game.LatLng
 	if p.geoMap != nil {
-		coord = p.geoMap.Sample(nil)
+		coord = p.geoMap.Sample()
 	} else {
-		coord = ProceduralCoordinate(nil)
+		coord = ProceduralCoordinate()
 	}
 
 	if !coord.Valid() {
 		return game.Location{}, fmt.Errorf("invalid coordinate sampled")
 	}
 
-	// If no API key is provided, run in simulated offline discovery mode
 	if p.apiKey == "" {
 		return simulatedLocation(coord), nil
 	}
