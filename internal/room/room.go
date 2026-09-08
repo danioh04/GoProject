@@ -2,11 +2,10 @@ package room
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
-	"geoduel/internal/game"
-	"geoduel/internal/metrics"
-	"geoduel/internal/randutil"
-	"geoduel/internal/wsutil"
+	"prism/internal/game"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -71,7 +70,7 @@ type Room struct {
 	logger   *slog.Logger
 
 	engine   *game.Engine
-	sessions map[game.PlayerID]*wsutil.Session
+	sessions map[game.PlayerID]*Session
 	timers   map[game.TimerKind]*time.Timer
 	store    Store
 
@@ -99,7 +98,7 @@ func Start(opts Options) *Room {
 		label:    opts.Label,
 		logger:   opts.Logger,
 		engine:   game.New(opts.Config, opts.Picker),
-		sessions: make(map[game.PlayerID]*wsutil.Session),
+		sessions: make(map[game.PlayerID]*Session),
 		timers:   make(map[game.TimerKind]*time.Timer),
 		store:    opts.Store,
 		commands: make(chan command, commandBuffer),
@@ -110,7 +109,7 @@ func Start(opts Options) *Room {
 	return r
 }
 
-func (r *Room) Attach(session *wsutil.Session, nickname string) AttachOutcome {
+func (r *Room) Attach(session *Session, nickname string) AttachOutcome {
 	cmd := attachCommand{session: session, nickname: nickname, reply: make(chan AttachOutcome, 1)}
 	if !r.deliver(cmd) {
 		return AttachOutcome{Reason: "room closed"}
@@ -123,7 +122,7 @@ func (r *Room) Attach(session *wsutil.Session, nickname string) AttachOutcome {
 	}
 }
 
-func (r *Room) NotifyInbound(playerID string, env wsutil.Envelope) {
+func (r *Room) NotifyInbound(playerID string, env Envelope) {
 	r.deliver(inboundCommand{playerID: game.PlayerID(playerID), env: env})
 }
 
@@ -141,26 +140,25 @@ func (r *Room) Done() <-chan struct{} {
 
 func (r *Room) Close() {
 	r.closeMu.Lock()
+	defer r.closeMu.Unlock()
 	if r.closed {
-		r.closeMu.Unlock()
 		return
 	}
 	r.closed = true
-	r.closeMu.Unlock()
 	close(r.commands)
 }
 
 type command any
 
 type attachCommand struct {
-	session  *wsutil.Session
+	session  *Session
 	nickname string
 	reply    chan AttachOutcome
 }
 
 type inboundCommand struct {
 	playerID game.PlayerID
-	env      wsutil.Envelope
+	env      Envelope
 }
 
 type disconnectCommand struct {
@@ -189,7 +187,7 @@ func (r *Room) run() {
 
 func (r *Room) shutdown() {
 	r.stopTimers()
-	kicked, _ := wsutil.NewEnvelope(wsutil.TypeKicked, map[string]string{"reason": "room closed"})
+	kicked, _ := NewEnvelope(TypeKicked, map[string]string{"reason": "room closed"})
 	for _, session := range r.sessions {
 		session.Send(kicked)
 		session.Kick()
@@ -219,7 +217,7 @@ func (r *Room) handleInbound(cmd inboundCommand) {
 	}
 
 	switch cmd.env.Type {
-	case wsutil.TypeGuess:
+	case TypeGuess:
 		var p struct {
 			Lat float64 `json:"lat"`
 			Lng float64 `json:"lng"`
@@ -233,7 +231,7 @@ func (r *Room) handleInbound(cmd inboundCommand) {
 			Guess:    game.LatLng{Lat: p.Lat, Lng: p.Lng},
 		}))
 
-	case wsutil.TypeStartGame:
+	case TypeStartGame:
 		r.execute(r.engine.Apply(game.StartEvent{PlayerID: cmd.playerID}))
 
 	default:
@@ -269,11 +267,11 @@ func (r *Room) execute(acts []game.Action) {
 			r.broadcastRoster()
 
 		case game.MatchStartedAction:
-			env, _ := wsutil.NewEnvelope(wsutil.TypeGameStart, map[string]int{"total_rounds": act.TotalRounds})
+			env, _ := NewEnvelope(TypeGameStart, map[string]int{"total_rounds": act.TotalRounds})
 			r.broadcast(env)
 
 		case game.RoundStartedAction:
-			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundStart, roundStartPayload{
+			env, _ := NewEnvelope(TypeRoundStart, roundStartPayload{
 				Round:        act.Round,
 				TotalRounds:  act.TotalRounds,
 				PanoID:       act.PanoID,
@@ -283,16 +281,17 @@ func (r *Room) execute(acts []game.Action) {
 			r.broadcast(env)
 
 		case game.GuessAcceptedAction:
-			metrics.GuessesTotal.Add(1)
 			if session, ok := r.sessions[act.PlayerID]; ok {
-				env, _ := wsutil.NewEnvelope(wsutil.TypeGuessAck, map[string]int{"round": act.Round})
+				env, _ := NewEnvelope(TypeGuessAck, map[string]int{"round": act.Round})
 				if !session.Send(env) {
 					session.Kick()
 				}
 			}
 
 		case game.RoundRevealedAction:
-			env, _ := wsutil.NewEnvelope(wsutil.TypeRoundResult, roundResultPayload{
+			// Cancel pending round deadline timer so it doesn't fire spurious timeout commands
+			r.stopTimer(game.TimerDeadline)
+			env, _ := NewEnvelope(TypeRoundResult, roundResultPayload{
 				Round:   act.Round,
 				Target:  act.Target,
 				Results: act.Results,
@@ -300,9 +299,13 @@ func (r *Room) execute(acts []game.Action) {
 			r.broadcast(env)
 
 		case game.MatchEndedAction:
-			env, _ := wsutil.NewEnvelope(wsutil.TypeGameOver, gameOverPayload{Standings: act.Standings})
+			gameID := newMatchID()
+			env, _ := NewEnvelope(TypeGameOver, gameOverPayload{
+				GameID:    gameID,
+				Standings: act.Standings,
+			})
 			r.broadcast(env)
-			r.flushMatch(act.Standings, act.Rounds)
+			r.flushMatch(gameID, act.Standings, act.Rounds)
 
 		case game.TimerScheduledAction:
 			r.armTimer(act.Tag, act.Delay)
@@ -315,20 +318,32 @@ func (r *Room) execute(acts []game.Action) {
 }
 
 func (r *Room) armTimer(tag game.TimerTag, delay time.Duration) {
-	if old := r.timers[tag.Kind]; old != nil {
-		old.Stop()
-	}
+	r.stopTimer(tag.Kind)
 	r.timers[tag.Kind] = time.AfterFunc(delay, func() {
 		r.deliver(timeoutCommand{tag: tag})
 	})
 }
 
-func (r *Room) flushMatch(standings []game.Standing, rounds []game.FinishedRound) {
+func (r *Room) stopTimer(kind game.TimerKind) {
+	if old, exists := r.timers[kind]; exists && old != nil {
+		old.Stop()
+		delete(r.timers, kind)
+	}
+}
+
+func (r *Room) stopTimers() {
+	for kind, t := range r.timers {
+		t.Stop()
+		delete(r.timers, kind)
+	}
+}
+
+func (r *Room) flushMatch(gameID string, standings []game.Standing, rounds []game.FinishedRound) {
 	if r.store == nil {
 		return
 	}
 	fg := FinishedGame{
-		ID:          newMatchID(),
+		ID:          gameID,
 		CreatedAt:   time.Now().UTC(),
 		TotalRounds: len(rounds),
 		Standings:   standings,
@@ -344,13 +359,6 @@ func (r *Room) flushMatch(standings []game.Standing, rounds []game.FinishedRound
 		}
 		r.logger.Info("game saved", "game_id", fg.ID)
 	})
-}
-
-func (r *Room) stopTimers() {
-	for kind, t := range r.timers {
-		t.Stop()
-		delete(r.timers, kind)
-	}
 }
 
 func (r *Room) publishClosed() {
@@ -396,11 +404,11 @@ func (r *Room) publish() {
 }
 
 func (r *Room) broadcastRoster() {
-	env, _ := wsutil.NewEnvelope(wsutil.TypeRoster, rosterPayload{Players: r.engine.Roster()})
+	env, _ := NewEnvelope(TypeRoster, rosterPayload{Players: r.engine.Roster()})
 	r.broadcast(env)
 }
 
-func (r *Room) broadcast(env wsutil.Envelope) {
+func (r *Room) broadcast(env Envelope) {
 	for _, session := range r.sessions {
 		if !session.Send(env) {
 			session.Kick()
@@ -408,6 +416,7 @@ func (r *Room) broadcast(env wsutil.Envelope) {
 	}
 }
 
+// deliver sends a command to the room's inbox while holding closeMu.RLock to prevent send-on-closed-channel.
 func (r *Room) deliver(cmd command) bool {
 	r.closeMu.RLock()
 	defer r.closeMu.RUnlock()
@@ -446,19 +455,20 @@ type roundResultPayload struct {
 }
 
 type gameOverPayload struct {
+	GameID    string          `json:"game_id"`
 	Standings []game.Standing `json:"standings"`
 }
 
-func joinedEnvelope(id game.PlayerID, host bool) wsutil.Envelope {
-	env, _ := wsutil.NewEnvelope(wsutil.TypeJoined, joinedPayload{
+func joinedEnvelope(id game.PlayerID, host bool) Envelope {
+	env, _ := NewEnvelope(TypeJoined, joinedPayload{
 		PlayerID: string(id),
 		Host:     host,
 	})
 	return env
 }
 
-func sendError(session *wsutil.Session, msg string) {
-	env, _ := wsutil.NewEnvelope(wsutil.TypeError, map[string]string{"error": msg})
+func sendError(session *Session, msg string) {
+	env, _ := NewEnvelope(TypeError, map[string]string{"error": msg})
 	if !session.Send(env) {
 		session.Kick()
 	}
@@ -474,9 +484,18 @@ func findRejected(acts []game.Action, playerID game.PlayerID) (string, bool) {
 }
 
 func newPlayerID() game.PlayerID {
-	return game.PlayerID(randutil.Hex(8))
+	return game.PlayerID(randHex(8))
 }
 
 func newMatchID() string {
-	return randutil.Hex(12)
+	return randHex(12)
+}
+
+func randHex(byteLen int) string {
+	if byteLen <= 0 {
+		byteLen = 8
+	}
+	b := make([]byte, byteLen)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

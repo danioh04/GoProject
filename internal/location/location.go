@@ -4,20 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"geoduel/internal/game"
-	"geoduel/internal/randutil"
+	"prism/internal/game"
 	"log/slog"
+	"math"
+	mrand "math/rand/v2"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 )
 
 const (
 	defaultEndpoint     = "https://maps.googleapis.com/maps/api/streetview/metadata"
 	defaultSearchRadius = 50000
-	defaultBufferSize   = 50
-	defaultWorkers      = 3
+	defaultJitterKm     = 5.0
 )
 
 type Pool struct {
@@ -26,14 +25,7 @@ type Pool struct {
 	radius     int
 	httpClient *http.Client
 	logger     *slog.Logger
-	geoMap     *Map
-
-	buffer   chan game.Location
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	isClosed bool
-	mu       sync.Mutex
+	seeds      []game.Location
 }
 
 type Option func(*Pool)
@@ -44,39 +36,32 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-func WithMapFile(path string) Option {
+func WithEndpoint(endpoint string) Option {
 	return func(p *Pool) {
-		if path != "" {
-			m, err := LoadMap(path)
-			if err != nil {
-				if p.logger != nil {
-					p.logger.Error("failed to load map file", "path", path, "error", err)
-				}
-			} else {
-				p.geoMap = m
-			}
-		}
+		p.endpoint = endpoint
 	}
 }
 
-func New(ctx context.Context, apiKey string, opts ...Option) *Pool {
-	cctx, cancel := context.WithCancel(ctx)
+func WithHTTPClient(client *http.Client) Option {
+	return func(p *Pool) {
+		p.httpClient = client
+	}
+}
+
+func New(apiKey string, opts ...Option) *Pool {
 	p := &Pool{
 		apiKey:     apiKey,
 		endpoint:   defaultEndpoint,
 		radius:     defaultSearchRadius,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		httpClient: &http.Client{Timeout: 4 * time.Second},
 		logger:     slog.Default(),
-		buffer:     make(chan game.Location, defaultBufferSize),
-		ctx:        cctx,
-		cancel:     cancel,
+		seeds:      CuratedLocations(),
 	}
 
 	for _, opt := range opts {
 		opt(p)
 	}
 
-	p.startWorkers(defaultWorkers)
 	return p
 }
 
@@ -85,68 +70,65 @@ func (p *Pool) Pick(n int) []game.Location {
 		return nil
 	}
 
+	// In offline simulation mode (no Google Maps API key), pick from curated seeds deterministically
+	if p.apiKey == "" {
+		return p.pickFromSeeds(n)
+	}
+
+	total := len(p.seeds)
+	if total == 0 {
+		return nil
+	}
+
 	out := make([]game.Location, 0, n)
 	seen := make(map[string]struct{}, n)
+	perm := mrand.Perm(total)
 
-	for len(out) < n {
-		select {
-		case loc := <-p.buffer:
-			if _, exists := seen[loc.ID]; !exists && loc.Valid() {
+	// Attempt on-demand discovery using Street View Metadata API across unique seed anchors
+	for i := 0; len(out) < n && i < total*3; i++ {
+		seed := p.seeds[perm[i%total]]
+		if i > 0 && i%total == 0 {
+			perm = mrand.Perm(total)
+		}
+
+		loc, err := p.discoverOne(seed.LatLng)
+		if err == nil && loc.Valid() {
+			if _, exists := seen[loc.ID]; !exists {
 				seen[loc.ID] = struct{}{}
 				out = append(out, loc)
+				continue
 			}
-		default:
-			goto waitForBuffer
+		}
+		// Fallback to seed directly if API lookup fails or panorama was already seen
+		if _, exists := seen[seed.ID]; !exists {
+			seen[seed.ID] = struct{}{}
+			out = append(out, seed)
 		}
 	}
+
 	return out
+}
 
-waitForBuffer:
-	if p.apiKey != "" {
-		timer := time.NewTimer(300 * time.Millisecond)
-		defer timer.Stop()
-
-		for len(out) < n {
-			select {
-			case loc := <-p.buffer:
-				if _, exists := seen[loc.ID]; !exists && loc.Valid() {
-					seen[loc.ID] = struct{}{}
-					out = append(out, loc)
-				}
-			case <-timer.C:
-				loc, err := p.discoverOne(p.ctx)
-				if err == nil && loc.Valid() {
-					if _, exists := seen[loc.ID]; !exists {
-						seen[loc.ID] = struct{}{}
-						out = append(out, loc)
-					}
-				} else if p.logger != nil {
-					p.logger.Warn("direct street view discovery failed", "error", err)
-				}
-			}
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(300 * time.Millisecond)
-		}
-		return out
+func (p *Pool) pickFromSeeds(n int) []game.Location {
+	total := len(p.seeds)
+	if total == 0 {
+		return nil
 	}
 
+	perm := mrand.Perm(total)
+	count := n
+	if count > total {
+		count = total
+	}
+
+	out := make([]game.Location, 0, n)
+	for i := 0; i < count; i++ {
+		out = append(out, p.seeds[perm[i]])
+	}
+
+	// If requested more than available seeds, repeat with random picks
 	for len(out) < n {
-		var coord game.LatLng
-		if p.geoMap != nil {
-			coord = p.geoMap.Sample()
-		} else {
-			coord = ProceduralCoordinate()
-		}
-		fallback := simulatedLocation(coord)
-		if _, exists := seen[fallback.ID]; !exists {
-			seen[fallback.ID] = struct{}{}
-			out = append(out, fallback)
-		}
+		out = append(out, p.seeds[mrand.IntN(total)])
 	}
 
 	return out
@@ -159,80 +141,21 @@ func (p *Pool) Picker() func(n int) []game.Location {
 }
 
 func (p *Pool) MapName() string {
-	if p.geoMap != nil {
-		return p.geoMap.Name
-	}
-	return "procedural"
+	return "curated_world"
 }
 
 func (p *Pool) Close() {
-	p.mu.Lock()
-	if p.isClosed {
-		p.mu.Unlock()
-		return
-	}
-	p.isClosed = true
-	p.mu.Unlock()
-
-	p.cancel()
-	p.wg.Wait()
+	// No background workers to close
 }
 
-func (p *Pool) startWorkers(count int) {
-	for range count {
-		p.wg.Add(1)
-		go func() {
-			p.workerLoop()
-		}()
-	}
-}
+func (p *Pool) discoverOne(coord game.LatLng) (game.Location, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
-func (p *Pool) workerLoop() {
-	defer p.wg.Done()
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		default:
-		}
-
-		loc, err := p.discoverOne(p.ctx)
-		if err != nil {
-			select {
-			case <-p.ctx.Done():
-				return
-			case <-time.After(500 * time.Millisecond):
-				continue
-			}
-		}
-
-		select {
-		case p.buffer <- loc:
-		case <-p.ctx.Done():
-			return
-		}
-	}
-}
-
-func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
-	var coord game.LatLng
-	if p.geoMap != nil {
-		coord = p.geoMap.Sample()
-	} else {
-		coord = ProceduralCoordinate()
-	}
-
-	if !coord.Valid() {
-		return game.Location{}, fmt.Errorf("invalid coordinate sampled")
-	}
-
-	if p.apiKey == "" {
-		return simulatedLocation(coord), nil
-	}
+	queryCoord := applyJitter(coord, defaultJitterKm)
 
 	reqURL := fmt.Sprintf("%s?location=%.6f,%.6f&radius=%d&key=%s",
-		p.endpoint, coord.Lat, coord.Lng, p.radius, url.QueryEscape(p.apiKey))
+		p.endpoint, queryCoord.Lat, queryCoord.Lng, p.radius, url.QueryEscape(p.apiKey))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
@@ -265,13 +188,32 @@ func (p *Pool) discoverOne(ctx context.Context) (game.Location, error) {
 	}, nil
 }
 
-func simulatedLocation(coord game.LatLng) game.Location {
-	panoID := "sim_" + randutil.Hex(8)
-	return game.Location{
-		ID:     panoID,
-		PanoID: panoID,
-		LatLng: coord,
+// applyJitter offsets a coordinate by up to maxKm in a random direction to discover
+// diverse street panoramas throughout an anchor landmark's broader metropolitan area.
+func applyJitter(coord game.LatLng, maxKm float64) game.LatLng {
+	if maxKm <= 0 {
+		return coord
 	}
+
+	// 1 degree latitude is approximately 111.0 km
+	latDelta := (mrand.Float64()*2 - 1) * (maxKm / 111.0)
+
+	// Scale longitude delta by cosine of latitude to account for meridian convergence
+	rad := coord.Lat * math.Pi / 180.0
+	cosLat := math.Cos(rad)
+	if math.Abs(cosLat) < 0.01 {
+		cosLat = 0.01 // safeguard near poles
+	}
+	lngDelta := (mrand.Float64()*2 - 1) * (maxKm / (111.0 * cosLat))
+
+	jittered := game.LatLng{
+		Lat: coord.Lat + latDelta,
+		Lng: coord.Lng + lngDelta,
+	}
+	if !jittered.Valid() {
+		return coord
+	}
+	return jittered
 }
 
 type metadataResponse struct {

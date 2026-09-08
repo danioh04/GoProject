@@ -1,9 +1,6 @@
-package hub
+package room
 
 import (
-	"geoduel/internal/metrics"
-	"geoduel/internal/randutil"
-	"geoduel/internal/room"
 	"log/slog"
 	mrand "math/rand/v2"
 	"strings"
@@ -12,31 +9,35 @@ import (
 )
 
 const (
-	codeLen      = 6
-	idBytes      = 12
-	codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	codeLen            = 6
+	idBytes            = 12
+	codeAlphabet       = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	lobbyInactivityTTL = 5 * time.Minute
 )
 
 type Hub struct {
 	logger   *slog.Logger
-	defaults room.Options
+	defaults Options
 
 	mu    sync.RWMutex
-	rooms map[string]*room.Room
+	rooms map[string]*Room
 }
 
-func New(logger *slog.Logger, defaults room.Options) *Hub {
+func NewHub(logger *slog.Logger, defaults Options) *Hub {
 	if defaults.MaxPlayers <= 0 {
 		defaults.MaxPlayers = 8
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return &Hub{
 		logger:   logger,
 		defaults: defaults,
-		rooms:    make(map[string]*room.Room),
+		rooms:    make(map[string]*Room),
 	}
 }
 
-func (h *Hub) Create(hostNickname string) *room.Room {
+func (h *Hub) Create(hostNickname string) *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -52,24 +53,34 @@ func (h *Hub) Create(hostNickname string) *room.Room {
 	opts.ID = generateID()
 	opts.JoinCode = code
 	opts.Label = hostNickname
+	opts.Config.CreatorNick = hostNickname
 	opts.Logger = h.logger
-	r := room.Start(opts)
+
+	r := Start(opts)
 	h.rooms[code] = r
-	metrics.RoomsActive.Add(1)
 	h.logger.Info("room created", "room_id", r.Snapshot().ID, "join_code", code)
+
+	// Inactivity watchdog: if no player joins within TTL, automatically close the abandoned room
+	inactivityTimer := time.AfterFunc(lobbyInactivityTTL, func() {
+		if r.Snapshot().PlayerCount == 0 && r.Snapshot().State == PhaseLobby {
+			h.logger.Info("room expired due to inactivity", "join_code", code)
+			r.Close()
+		}
+	})
 
 	go func() {
 		<-r.Done()
+		inactivityTimer.Stop()
 		h.mu.Lock()
 		delete(h.rooms, code)
 		h.mu.Unlock()
-		metrics.RoomsActive.Add(-1)
 		h.logger.Info("room removed", "join_code", code)
 	}()
+
 	return r
 }
 
-func (h *Hub) Get(code string) (*room.Room, bool) {
+func (h *Hub) Get(code string) (*Room, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	r, ok := h.rooms[strings.ToUpper(strings.TrimSpace(code))]
@@ -78,7 +89,7 @@ func (h *Hub) Get(code string) (*room.Room, bool) {
 
 func (h *Hub) Shutdown(wait time.Duration) int {
 	h.mu.RLock()
-	rooms := make([]*room.Room, 0, len(h.rooms))
+	rooms := make([]*Room, 0, len(h.rooms))
 	for _, r := range h.rooms {
 		rooms = append(rooms, r)
 	}
@@ -131,5 +142,5 @@ func generateCode() string {
 }
 
 func generateID() string {
-	return randutil.Hex(idBytes)
+	return randHex(idBytes)
 }

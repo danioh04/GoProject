@@ -3,24 +3,21 @@ package main
 import (
 	"context"
 	"errors"
-	_ "expvar"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"geoduel/internal/api"
-	"geoduel/internal/config"
-	"geoduel/internal/game"
-	"geoduel/internal/hub"
-	"geoduel/internal/location"
-	"geoduel/internal/room"
-	"geoduel/internal/store"
+	"prism/internal/api"
+	"prism/internal/config"
+	"prism/internal/game"
+	"prism/internal/location"
+	"prism/internal/room"
+	"prism/internal/store"
 )
 
 func main() {
@@ -38,16 +35,13 @@ func run(ctx context.Context) error {
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
-	pool := location.New(ctx, cfg.GoogleMapsAPIKey,
-		location.WithLogger(logger),
-		location.WithMapFile(cfg.MapFile),
-	)
+	pool := location.New(cfg.GoogleMapsAPIKey, location.WithLogger(logger))
 	defer pool.Close()
-	logger.Info("location pool ready", "map", pool.MapName())
+	logger.Info("location provider ready", "map", pool.MapName())
 	if cfg.GoogleMapsAPIKey != "" {
 		logger.Info("dynamic google maps location discovery enabled")
 	} else {
-		logger.Info("dynamic location discovery running in offline simulation mode")
+		logger.Info("running in offline simulation mode with curated seeds")
 	}
 
 	gameCfg := game.DefaultConfig()
@@ -70,9 +64,9 @@ func run(ctx context.Context) error {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 		persistence = pgStore
-		logger.Info("postgres ready")
+		logger.Info("postgres persistence ready")
 	} else {
-		logger.Info("postgres disabled", "reason", "DATABASE_URL not set")
+		logger.Info("postgres persistence disabled", "reason", "DATABASE_URL not set")
 	}
 
 	opts := room.Options{
@@ -84,25 +78,11 @@ func run(ctx context.Context) error {
 		opts.Store = pgStore
 	}
 
-	rooms := hub.New(logger, opts)
+	rooms := room.NewHub(logger, opts)
 
 	srv := &http.Server{
-		Handler:           api.New(logger, rooms, persistence, cfg.GoogleMapsAPIKey),
+		Handler:           api.New(logger, rooms, persistence, cfg.GoogleMapsAPIKey != ""),
 		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	var debugSrv *http.Server
-	if cfg.DebugAddr != "" {
-		debugSrv = &http.Server{
-			Addr:              cfg.DebugAddr,
-			ReadHeaderTimeout: 3 * time.Second,
-		}
-		go func() {
-			logger.Info("debug server listening", "addr", cfg.DebugAddr)
-			if err := debugSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("debug server failed", "error", err)
-			}
-		}()
 	}
 
 	listener, err := net.Listen("tcp", cfg.Addr)
@@ -130,15 +110,12 @@ func run(ctx context.Context) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
-	if debugSrv != nil {
-		_ = debugSrv.Shutdown(shutdownCtx)
-	}
 
-	logger.Info("stopping rooms")
+	logger.Info("stopping active rooms")
 	if closed := rooms.Shutdown(3 * time.Second); closed > 0 {
 		logger.Info("rooms stopped", "count", closed)
 	}
-	logger.Info("stopped")
+	logger.Info("server stopped gracefully")
 	return nil
 }
 

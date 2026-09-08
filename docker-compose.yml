@@ -1,4 +1,4 @@
-name: geoduel
+name: prism
 
 services:
   server:
@@ -7,13 +7,10 @@ services:
       ADDR: ":8080"
       LOG_LEVEL: info
       LOG_FORMAT: json
-      DEBUG_ADDR: ":6060"
-      DATABASE_URL: postgres://geoduel:geoduel@db:5432/geoduel?sslmode=disable
+      DATABASE_URL: postgres://prism:prism@db:5432/prism?sslmode=disable
       GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY:-}"
-      MAP_FILE: "${MAP_FILE:-}"
     ports:
       - "8080:8080"
-      - "6060:6060"
     depends_on:
       db:
         condition: service_healthy
@@ -22,15 +19,15 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: geoduel
-      POSTGRES_PASSWORD: geoduel
-      POSTGRES_DB: geoduel
+      POSTGRES_USER: prism
+      POSTGRES_PASSWORD: prism
+      POSTGRES_DB: prism
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U geoduel"]
+      test: ["CMD-SHELL", "pg_isready -U prism"]
       interval: 2s
       timeout: 3s
       retries: 15

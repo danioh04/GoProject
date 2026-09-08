@@ -23,6 +23,9 @@ type Engine struct {
 }
 
 func New(cfg Config, pick func(n int) []Location) *Engine {
+	if cfg.Clock == nil {
+		cfg.Clock = RealClock{}
+	}
 	return &Engine{
 		cfg:           cfg,
 		pick:          pick,
@@ -32,6 +35,10 @@ func New(cfg Config, pick func(n int) []Location) *Engine {
 		totals:        make(map[PlayerID]int),
 		roundsHistory: make([]FinishedRound, 0, cfg.Rounds),
 	}
+}
+
+func (e *Engine) now() time.Time {
+	return e.cfg.Clock.Now()
 }
 
 func (e *Engine) Apply(ev Event) []Action {
@@ -57,7 +64,9 @@ func (e *Engine) PlayerCount() int { return len(e.order) }
 func (e *Engine) Roster() []Player {
 	out := make([]Player, 0, len(e.order))
 	for _, id := range e.order {
-		out = append(out, *e.players[id])
+		if p, ok := e.players[id]; ok {
+			out = append(out, *p)
+		}
 	}
 	return out
 }
@@ -75,7 +84,17 @@ func (e *Engine) applyJoin(ev JoinEvent) []Action {
 		}
 	}
 
-	host := len(e.order) == 0
+	isCreator := e.cfg.CreatorNick != "" && strings.EqualFold(ev.Nickname, e.cfg.CreatorNick)
+	host := len(e.order) == 0 || isCreator
+
+	if isCreator && len(e.order) > 0 {
+		for _, pid := range e.order {
+			if p, ok := e.players[pid]; ok {
+				p.IsHost = false
+			}
+		}
+	}
+
 	e.players[ev.PlayerID] = &Player{PlayerID: ev.PlayerID, Nickname: ev.Nickname, IsHost: host}
 	e.order = append(e.order, ev.PlayerID)
 
@@ -94,6 +113,19 @@ func (e *Engine) applyLeave(ev LeaveEvent) []Action {
 	if len(e.order) == 0 {
 		return []Action{RoomEmptyAction{}}
 	}
+
+	if (e.phase == PhasePlaying || e.phase == PhaseReveal) && len(e.order) < e.cfg.MinPlayers {
+		e.phase = PhaseFinished
+		return []Action{
+			RosterChangedAction{},
+			MatchEndedAction{
+				Standings: e.sortedStandings(),
+				Rounds:    e.roundsHistory,
+				Reason:    "insufficient_players",
+			},
+		}
+	}
+
 	actions := []Action{RosterChangedAction{}}
 	return append(actions, e.maybeReveal()...)
 }
@@ -156,18 +188,28 @@ func (e *Engine) removePlayer(id PlayerID) {
 			break
 		}
 	}
+	delete(e.players, id)
+
 	if e.phase == PhaseLobby {
-		delete(e.players, id)
 		delete(e.totals, id)
 		for round := range e.guesses {
 			delete(e.guesses[round], id)
 		}
 	}
-	if remaining := e.order; len(remaining) > 0 && e.players[remaining[0]] != nil {
-		for _, pid := range remaining {
-			e.players[pid].IsHost = false
+
+	if len(e.order) > 0 {
+		hasHost := false
+		for _, pid := range e.order {
+			if p := e.players[pid]; p != nil && p.IsHost {
+				hasHost = true
+				break
+			}
 		}
-		e.players[remaining[0]].IsHost = true
+		if !hasHost {
+			if p := e.players[e.order[0]]; p != nil {
+				p.IsHost = true
+			}
+		}
 	}
 }
 
@@ -177,7 +219,7 @@ func (e *Engine) beginRound(round int) []Action {
 	e.guesses[round] = make(map[PlayerID]LatLng)
 
 	loc := e.locations[round-1]
-	deadline := time.Now().Add(e.cfg.RoundTime)
+	deadline := e.now().Add(e.cfg.RoundTime)
 
 	return []Action{
 		RoundStartedAction{
@@ -208,7 +250,11 @@ func (e *Engine) revealNow() []Action {
 	results := make([]RoundResult, 0, len(e.order))
 	for _, id := range e.order {
 		p := e.players[id]
-		res := RoundResult{PlayerID: id, Nickname: p.Nickname, Score: 0}
+		nick := ""
+		if p != nil {
+			nick = p.Nickname
+		}
+		res := RoundResult{PlayerID: id, Nickname: nick, Score: 0}
 		if g, ok := e.guesses[e.round][id]; ok {
 			res.Guess = &g
 			res.DistanceM = haversineMeters(g, target)
@@ -251,9 +297,13 @@ func (e *Engine) advanceRound() []Action {
 func (e *Engine) sortedStandings() []Standing {
 	out := make([]Standing, 0, len(e.order))
 	for _, id := range e.order {
+		nick := ""
+		if p, ok := e.players[id]; ok {
+			nick = p.Nickname
+		}
 		out = append(out, Standing{
 			PlayerID: id,
-			Nickname: e.players[id].Nickname,
+			Nickname: nick,
 			Total:    e.totals[id],
 		})
 	}

@@ -20,8 +20,13 @@ func main() {
 	addr := flag.String("addr", "localhost:8080", "server address")
 	rooms := flag.Int("rooms", 10, "concurrent rooms")
 	perRoom := flag.Int("per-room", 3, "players per room")
-	verbose := flag.Bool("v", false, "verbose output (print real-time match events)")
+	verbose := flag.Bool("v", false, "verbose output (print real-time match events; defaults to true for 1 room)")
 	flag.Parse()
+
+	isVerbose := *verbose
+	if !isVerbose && *rooms == 1 {
+		isVerbose = true
+	}
 
 	start := time.Now()
 	failures := make([]string, 0)
@@ -32,14 +37,7 @@ func main() {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			defer func() {
-				if rec := recover(); rec != nil {
-					mu.Lock()
-					failures = append(failures, fmt.Sprintf("room %d: %v", n, rec))
-					mu.Unlock()
-				}
-			}()
-			if err := playMatch(*addr, n, *perRoom, *verbose); err != nil {
+			if err := playMatch(*addr, n, *perRoom, isVerbose); err != nil {
 				mu.Lock()
 				failures = append(failures, fmt.Sprintf("room %d: %v", n, err))
 				mu.Unlock()
@@ -62,7 +60,7 @@ func main() {
 func playMatch(addr string, n, perRoom int, verbose bool) error {
 	code, err := createRoom(addr, fmt.Sprintf("host-%d", n))
 	if err != nil {
-		return err
+		return fmt.Errorf("create room: %w", err)
 	}
 
 	if verbose {
@@ -114,20 +112,25 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 		fmt.Printf("[Room %s] All bots connected. %s starting match...\n", code, host.label)
 	}
 
-	host.send(envelope{Version: 1, Type: "start_game"})
+	if err := host.send(envelope{Version: 1, Type: "start_game"}); err != nil {
+		return fmt.Errorf("host start game: %w", err)
+	}
 
-	guesses := 0
 	for _, b := range bots {
-		env := b.readUntil("game_start", "error")
-		if env.Type == "error" {
-			return fmt.Errorf("%s: %s", b.label, env.Payload)
+		if _, err := b.readUntil("game_start"); err != nil {
+			return fmt.Errorf("%s waiting for game_start: %w", b.label, err)
 		}
 	}
 
 	var lastEnd envelope
 	roundsPlayed := 0
+	guesses := 0
+
 	for {
-		rs, isRound := bots[0].waitForAny("round_start", "game_over")
+		rs, isRound, err := bots[0].waitForAny("round_start", "game_over")
+		if err != nil {
+			return fmt.Errorf("bot 0 wait round_start/game_over: %w", err)
+		}
 		if !isRound {
 			lastEnd = rs
 			break
@@ -145,15 +148,23 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 		}
 
 		for _, b := range bots[1:] {
-			b.readUntil("round_start")
+			if _, err := b.readUntil("round_start"); err != nil {
+				return fmt.Errorf("%s read round_start: %w", b.label, err)
+			}
 		}
-		time.Sleep(time.Duration(rand.IntN(150)+50) * time.Millisecond)
+
+		time.Sleep(time.Duration(rand.IntN(100)+30) * time.Millisecond)
+
 		for _, b := range bots {
 			lat := -50.0 + rand.Float64()*115.0
 			lng := -170.0 + rand.Float64()*340.0
 			body, _ := json.Marshal(map[string]float64{"lat": lat, "lng": lng})
-			b.send(envelope{Version: 1, Type: "guess", Payload: body})
-			b.readUntil("guess_ack")
+			if err := b.send(envelope{Version: 1, Type: "guess", Payload: body}); err != nil {
+				return fmt.Errorf("%s send guess: %w", b.label, err)
+			}
+			if _, err := b.readUntil("guess_ack"); err != nil {
+				return fmt.Errorf("%s wait guess_ack: %w", b.label, err)
+			}
 			guesses++
 			if verbose {
 				fmt.Printf("  │  -> [%s] guessed (%.4f, %.4f)\n", b.label, lat, lng)
@@ -162,7 +173,11 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 
 		var lastResult envelope
 		for _, b := range bots {
-			lastResult = b.readUntil("round_result")
+			res, err := b.readUntil("round_result")
+			if err != nil {
+				return fmt.Errorf("%s wait round_result: %w", b.label, err)
+			}
+			lastResult = res
 		}
 
 		if verbose {
@@ -188,18 +203,19 @@ func playMatch(addr string, n, perRoom int, verbose bool) error {
 	}
 
 	for _, b := range bots[1:] {
-		_, _ = b.waitForAny("game_over")
+		_, _, _ = b.waitForAny("game_over")
 	}
 
 	if verbose {
 		var goPayload struct {
+			GameID    string `json:"game_id"`
 			Standings []struct {
 				Nickname string `json:"nickname"`
 				Total    int    `json:"total"`
 			} `json:"standings"`
 		}
 		_ = json.Unmarshal(lastEnd.Payload, &goPayload)
-		fmt.Printf("\n[Room %s] Final Standings:\n", code)
+		fmt.Printf("\n[Room %s] Final Standings (Match ID: %s):\n", code, goPayload.GameID)
 		for rank, s := range goPayload.Standings {
 			winnerBadge := ""
 			if rank == 0 {
@@ -230,13 +246,14 @@ type bot struct {
 	err    chan error
 }
 
-func (b *bot) send(env envelope) {
-	data, _ := json.Marshal(env)
+func (b *bot) send(env envelope) error {
+	data, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := requestCtx()
 	defer cancel()
-	if err := b.conn.Write(ctx, websocket.MessageText, data); err != nil {
-		panic(fmt.Sprintf("[%s] write: %v", b.label, err))
-	}
+	return b.conn.Write(ctx, websocket.MessageText, data)
 }
 
 func (b *bot) readLoop() {
@@ -256,40 +273,40 @@ func (b *bot) readLoop() {
 	}
 }
 
-func (b *bot) readUntil(want ...string) envelope {
+func (b *bot) readUntil(want ...string) (envelope, error) {
 	timeout := time.After(20 * time.Second)
 	for {
 		select {
 		case env := <-b.in:
 			if slices.Contains(want, env.Type) {
-				return env
+				return env, nil
 			}
 			if env.Type == "error" {
-				panic(fmt.Sprintf("[%s] server error while waiting for %v: %s", b.label, want, string(env.Payload)))
+				return env, fmt.Errorf("server error: %s", string(env.Payload))
 			}
 		case err := <-b.err:
-			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
+			return envelope{}, fmt.Errorf("read error: %w", err)
 		case <-timeout:
-			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
+			return envelope{}, fmt.Errorf("timeout waiting for %v", want)
 		}
 	}
 }
 
-func (b *bot) waitForAny(want ...string) (envelope, bool) {
+func (b *bot) waitForAny(want ...string) (envelope, bool, error) {
 	timeout := time.After(20 * time.Second)
 	for {
 		select {
 		case env := <-b.in:
 			if slices.Contains(want, env.Type) {
-				return env, env.Type != "game_over"
+				return env, env.Type != "game_over", nil
 			}
 			if env.Type == "error" {
-				panic(fmt.Sprintf("[%s] server error while waiting for %v: %s", b.label, want, string(env.Payload)))
+				return env, false, fmt.Errorf("server error: %s", string(env.Payload))
 			}
 		case err := <-b.err:
-			panic(fmt.Sprintf("[%s] read %v: %v", b.label, want, err))
+			return envelope{}, false, fmt.Errorf("read error: %w", err)
 		case <-timeout:
-			panic(fmt.Sprintf("[%s] never received %v", b.label, want))
+			return envelope{}, false, fmt.Errorf("timeout waiting for %v", want)
 		}
 	}
 }
@@ -308,6 +325,11 @@ func createRoom(addr, nickname string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
 	var out struct {
 		JoinCode string `json:"join_code"`
 	}
@@ -335,7 +357,11 @@ func join(addr, code, name string) (*bot, error) {
 		err:   make(chan error, 1),
 	}
 	go b.readLoop()
-	joined := b.readUntil("joined")
+	joined, err := b.readUntil("joined")
+	if err != nil {
+		_ = conn.CloseNow()
+		return nil, fmt.Errorf("wait for joined: %w", err)
+	}
 	var p struct {
 		Host bool `json:"host"`
 	}

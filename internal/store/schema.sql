@@ -33,5 +33,3 @@ CREATE TABLE IF NOT EXISTS guesses (
 	PRIMARY KEY (game_id, round, player_id),
 	FOREIGN KEY (game_id, round) REFERENCES rounds(game_id, round) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_rounds_location ON rounds (location_id);

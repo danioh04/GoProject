@@ -4,6 +4,14 @@ import (
 	"time"
 )
 
+type Clock interface {
+	Now() time.Time
+}
+
+type RealClock struct{}
+
+func (RealClock) Now() time.Time { return time.Now() }
+
 type PlayerID string
 
 type Player struct {
@@ -70,12 +78,14 @@ type TimerTag struct {
 }
 
 type Config struct {
-	Rounds     int
-	RoundTime  time.Duration
-	RevealTime time.Duration
-	MaxPlayers int
-	MinPlayers int
-	MaxScore   int
+	Rounds      int
+	RoundTime   time.Duration
+	RevealTime  time.Duration
+	MaxPlayers  int
+	MinPlayers  int
+	MaxScore    int
+	Clock       Clock
+	CreatorNick string
 }
 
 func DefaultConfig() Config {
@@ -86,6 +96,7 @@ func DefaultConfig() Config {
 		MaxPlayers: 8,
 		MinPlayers: 2,
 		MaxScore:   5000,
+		Clock:      RealClock{},
 	}
 }
 
@@ -194,6 +205,7 @@ func (a RoundRevealedAction) actionKind() actionType { return actRoundRevealed }
 type MatchEndedAction struct {
 	Standings []Standing
 	Rounds    []FinishedRound
+	Reason    string
 }
 
 func (a MatchEndedAction) actionKind() actionType { return actMatchEnded }

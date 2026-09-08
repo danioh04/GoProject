@@ -7,7 +7,7 @@ build:
 	go build -o bin/server ./cmd/server
 
 test:
-	go test ./... -count=1
+	go test -v ./... -count=1
 
 test-race:
 	go test ./... -race -count=1

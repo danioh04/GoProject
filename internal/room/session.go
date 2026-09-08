@@ -1,4 +1,4 @@
-package wsutil
+package room
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 const (
 	ProtocolVersion = 1
 	MaxMessageBytes = 1 << 12
-	SendBuffer      = 16
+	SendBuffer      = 32
 	PingInterval    = 25 * time.Second
 	WriteTimeout    = 5 * time.Second
 
@@ -202,7 +202,6 @@ func (s *Session) writePump() {
 				return
 			}
 		case <-s.done:
-			_ = s.conn.Close(websocket.StatusNormalClosure, "")
 			return
 		}
 	}
