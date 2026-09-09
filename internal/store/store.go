@@ -5,12 +5,13 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"prism/internal/game"
-	"prism/internal/room"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"scope/internal/game"
+	"scope/internal/room"
 )
 
 //go:embed schema.sql
@@ -18,54 +19,40 @@ var schemaSQL string
 
 var ErrNotFound = errors.New("not found")
 
-type StandingRow struct {
-	PlayerID   string `json:"player_id"`
-	Nickname   string `json:"nickname"`
-	TotalScore int    `json:"total_score"`
-	Placement  int    `json:"placement"`
-}
-
-type GameDetail struct {
-	ID          string               `json:"id"`
-	CreatedAt   time.Time            `json:"created_at"`
-	TotalRounds int                  `json:"total_rounds"`
-	Standings   []StandingRow        `json:"standings"`
-	Rounds      []game.FinishedRound `json:"rounds"`
-}
-
-type GameSummary struct {
-	ID          string    `json:"id"`
-	CreatedAt   time.Time `json:"created_at"`
-	TotalRounds int       `json:"total_rounds"`
-}
-
 type Store struct {
 	pool *pgxpool.Pool
 }
 
+// Open initializes a connection pool to PostgreSQL and verifies network connectivity.
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse connection config: %w", err)
 	}
+
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
+
 	return &Store{pool: pool}, nil
 }
 
+// Migrate executes embedded SQL migrations to ensure required tables and indexes exist.
 func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+
 	return nil
 }
 
+// Close terminates the PostgreSQL connection pool.
 func (s *Store) Close() {
 	s.pool.Close()
 }
 
+// SaveGame writes finished game details, player standings, round locations, and guesses in a single transaction.
 func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -74,7 +61,6 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	batch := &pgx.Batch{}
-
 	batch.Queue(
 		`INSERT INTO games (id, created_at, total_rounds) VALUES ($1, $2, $3)`,
 		g.ID, g.CreatedAt, g.TotalRounds,
@@ -118,6 +104,7 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 			return fmt.Errorf("batch insert item %d: %w", i, err)
 		}
 	}
+
 	if err := br.Close(); err != nil {
 		return fmt.Errorf("close batch: %w", err)
 	}
@@ -125,10 +112,18 @@ func (s *Store) SaveGame(ctx context.Context, g room.FinishedGame) error {
 	return tx.Commit(ctx)
 }
 
+type GameSummary struct {
+	ID          string    `json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	TotalRounds int       `json:"total_rounds"`
+}
+
+// ListRecentGames fetches a page of recent game summaries sorted by creation time descending.
 func (s *Store) ListRecentGames(ctx context.Context, limit int) ([]GameSummary, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
+
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, created_at, total_rounds
 		 FROM games
@@ -147,12 +142,28 @@ func (s *Store) ListRecentGames(ctx context.Context, limit int) ([]GameSummary, 
 		}
 		out = append(out, g)
 	}
+
 	return out, rows.Err()
 }
 
+type StandingRow struct {
+	PlayerID   string `json:"player_id"`
+	Nickname   string `json:"nickname"`
+	TotalScore int    `json:"total_score"`
+	Placement  int    `json:"placement"`
+}
+
+type GameDetail struct {
+	ID          string               `json:"id"`
+	CreatedAt   time.Time            `json:"created_at"`
+	TotalRounds int                  `json:"total_rounds"`
+	Standings   []StandingRow        `json:"standings"`
+	Rounds      []game.FinishedRound `json:"rounds"`
+}
+
+// GameDetail fetches the complete game record, participants, rounds, and player guesses for a given match ID.
 func (s *Store) GameDetail(ctx context.Context, id string) (*GameDetail, error) {
 	detail := &GameDetail{ID: id}
-
 	err := s.pool.QueryRow(ctx,
 		`SELECT created_at, total_rounds FROM games WHERE id = $1`, id).
 		Scan(&detail.CreatedAt, &detail.TotalRounds)

@@ -10,7 +10,10 @@ type Clock interface {
 
 type RealClock struct{}
 
-func (RealClock) Now() time.Time { return time.Now() }
+// Returns the current wall-clock time
+func (RealClock) Now() time.Time {
+	return time.Now()
+}
 
 type PlayerID string
 
@@ -34,8 +37,9 @@ type LatLng struct {
 	Lng float64 `json:"lng"`
 }
 
-func (p LatLng) Valid() bool {
-	return p.Lat >= -90 && p.Lat <= 90 && p.Lng >= -180 && p.Lng <= 180
+// Checks whether latitude and longitude are within Earth's bounds
+func (ll LatLng) Valid() bool {
+	return ll.Lat >= -90 && ll.Lat <= 90 && ll.Lng >= -180 && ll.Lng <= 180
 }
 
 type Location struct {
@@ -78,16 +82,17 @@ type TimerTag struct {
 }
 
 type Config struct {
-	Rounds      int
-	RoundTime   time.Duration
-	RevealTime  time.Duration
-	MaxPlayers  int
-	MinPlayers  int
-	MaxScore    int
-	Clock       Clock
-	CreatorNick string
+	Rounds          int
+	RoundTime       time.Duration
+	RevealTime      time.Duration
+	MaxPlayers      int
+	MinPlayers      int
+	MaxScore        int
+	Clock           Clock
+	CreatorNickname string
 }
 
+// Provides recommended production settings for game sessions
 func DefaultConfig() Config {
 	return Config{
 		Rounds:     5,
@@ -100,7 +105,9 @@ func DefaultConfig() Config {
 	}
 }
 
-type Event interface{ kind() eventType }
+type Event interface {
+	kind() eventType
+}
 
 type eventType string
 
@@ -117,28 +124,51 @@ type JoinEvent struct {
 	Nickname string
 }
 
-func (e JoinEvent) kind() eventType { return evJoin }
+// Returns the discriminator for JoinEvent
+func (e JoinEvent) kind() eventType {
+	return evJoin
+}
 
-type LeaveEvent struct{ PlayerID PlayerID }
+type LeaveEvent struct {
+	PlayerID PlayerID
+}
 
-func (e LeaveEvent) kind() eventType { return evLeave }
+// Returns the discriminator for LeaveEvent
+func (e LeaveEvent) kind() eventType {
+	return evLeave
+}
 
-type StartEvent struct{ PlayerID PlayerID }
+type StartEvent struct {
+	PlayerID PlayerID
+}
 
-func (e StartEvent) kind() eventType { return evStart }
+// Returns the discriminator for StartEvent
+func (e StartEvent) kind() eventType {
+	return evStart
+}
 
 type GuessEvent struct {
 	PlayerID PlayerID
 	Guess    LatLng
 }
 
-func (e GuessEvent) kind() eventType { return evGuess }
+// Returns the discriminator for GuessEvent
+func (e GuessEvent) kind() eventType {
+	return evGuess
+}
 
-type TimeoutEvent struct{ Tag TimerTag }
+type TimeoutEvent struct {
+	Tag TimerTag
+}
 
-func (e TimeoutEvent) kind() eventType { return evTimeout }
+// Returns the discriminator for TimeoutEvent
+func (e TimeoutEvent) kind() eventType {
+	return evTimeout
+}
 
-type Action interface{ actionKind() actionType }
+type Action interface {
+	actionKind() actionType
+}
 
 type actionType string
 
@@ -146,11 +176,11 @@ const (
 	actPlayerJoined   actionType = "player_joined"
 	actRejected       actionType = "rejected"
 	actRosterChanged  actionType = "roster_changed"
-	actMatchStarted   actionType = "match_started"
+	actGameStarted    actionType = "game_started"
 	actRoundStarted   actionType = "round_started"
 	actGuessAccepted  actionType = "guess_accepted"
 	actRoundRevealed  actionType = "round_revealed"
-	actMatchEnded     actionType = "match_ended"
+	actGameEnded      actionType = "game_ended"
 	actTimerScheduled actionType = "timer_scheduled"
 	actRoomEmpty      actionType = "room_empty"
 )
@@ -160,22 +190,36 @@ type PlayerJoinedAction struct {
 	Host     bool
 }
 
-func (a PlayerJoinedAction) actionKind() actionType { return actPlayerJoined }
+// Returns the discriminator for PlayerJoinedAction
+func (a PlayerJoinedAction) actionKind() actionType {
+	return actPlayerJoined
+}
 
 type RejectedAction struct {
 	PlayerID PlayerID
 	Reason   string
 }
 
-func (a RejectedAction) actionKind() actionType { return actRejected }
+// Returns the discriminator for RejectedAction
+func (a RejectedAction) actionKind() actionType {
+	return actRejected
+}
 
 type RosterChangedAction struct{}
 
-func (a RosterChangedAction) actionKind() actionType { return actRosterChanged }
+// Returns the discriminator for RosterChangedAction
+func (a RosterChangedAction) actionKind() actionType {
+	return actRosterChanged
+}
 
-type MatchStartedAction struct{ TotalRounds int }
+type GameStartedAction struct {
+	TotalRounds int
+}
 
-func (a MatchStartedAction) actionKind() actionType { return actMatchStarted }
+// Returns the discriminator for GameStartedAction
+func (a GameStartedAction) actionKind() actionType {
+	return actGameStarted
+}
 
 type RoundStartedAction struct {
 	Round        int
@@ -185,14 +229,20 @@ type RoundStartedAction struct {
 	RoundSeconds int
 }
 
-func (a RoundStartedAction) actionKind() actionType { return actRoundStarted }
+// Returns the discriminator for RoundStartedAction
+func (a RoundStartedAction) actionKind() actionType {
+	return actRoundStarted
+}
 
 type GuessAcceptedAction struct {
 	PlayerID PlayerID
 	Round    int
 }
 
-func (a GuessAcceptedAction) actionKind() actionType { return actGuessAccepted }
+// Returns the discriminator for GuessAcceptedAction
+func (a GuessAcceptedAction) actionKind() actionType {
+	return actGuessAccepted
+}
 
 type RoundRevealedAction struct {
 	Round   int
@@ -200,23 +250,35 @@ type RoundRevealedAction struct {
 	Results []RoundResult
 }
 
-func (a RoundRevealedAction) actionKind() actionType { return actRoundRevealed }
+// Returns the discriminator for RoundRevealedAction
+func (a RoundRevealedAction) actionKind() actionType {
+	return actRoundRevealed
+}
 
-type MatchEndedAction struct {
+type GameEndedAction struct {
 	Standings []Standing
 	Rounds    []FinishedRound
 	Reason    string
 }
 
-func (a MatchEndedAction) actionKind() actionType { return actMatchEnded }
+// Returns the discriminator for GameEndedAction
+func (a GameEndedAction) actionKind() actionType {
+	return actGameEnded
+}
 
 type TimerScheduledAction struct {
 	Tag   TimerTag
 	Delay time.Duration
 }
 
-func (a TimerScheduledAction) actionKind() actionType { return actTimerScheduled }
+// Returns the discriminator for TimerScheduledAction
+func (a TimerScheduledAction) actionKind() actionType {
+	return actTimerScheduled
+}
 
 type RoomEmptyAction struct{}
 
-func (a RoomEmptyAction) actionKind() actionType { return actRoomEmpty }
+// Returns the discriminator for RoomEmptyAction
+func (a RoomEmptyAction) actionKind() actionType {
+	return actRoomEmpty
+}

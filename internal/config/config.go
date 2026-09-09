@@ -17,6 +17,7 @@ type Config struct {
 	GoogleMapsAPIKey string
 }
 
+// Load reads configuration settings from environment variables with fallback defaults.
 func Load() Config {
 	return Config{
 		Addr:             envOr("ADDR", ":8080"),
@@ -31,18 +32,22 @@ func Load() Config {
 	}
 }
 
+// envOr retrieves an environment variable or returns the provided fallback if unset.
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+
 	return fallback
 }
 
+// envIntOr parses an integer environment variable or returns the provided fallback if unset or invalid.
 func envIntOr(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
+
 	return fallback
 }

@@ -12,14 +12,15 @@ import (
 	"syscall"
 	"time"
 
-	"prism/internal/api"
-	"prism/internal/config"
-	"prism/internal/game"
-	"prism/internal/location"
-	"prism/internal/room"
-	"prism/internal/store"
+	"scope/internal/api"
+	"scope/internal/config"
+	"scope/internal/game"
+	"scope/internal/location"
+	"scope/internal/room"
+	"scope/internal/store"
 )
 
+// main initializes the process context and starts the server.
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -30,13 +31,13 @@ func main() {
 	}
 }
 
+// run boots server components, establishes storage connections, and orchestrates graceful shutdown.
 func run(ctx context.Context) error {
 	cfg := config.Load()
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
 	pool := location.New(cfg.GoogleMapsAPIKey, location.WithLogger(logger))
-	defer pool.Close()
 	logger.Info("location provider ready", "map", pool.MapName())
 	if cfg.GoogleMapsAPIKey != "" {
 		logger.Info("dynamic google maps location discovery enabled")
@@ -54,12 +55,14 @@ func run(ctx context.Context) error {
 	if cfg.DatabaseURL != "" {
 		bootCtx, cancelBoot := context.WithTimeout(ctx, 10*time.Second)
 		defer cancelBoot()
+
 		var err error
 		pgStore, err = store.Open(bootCtx, cfg.DatabaseURL)
 		if err != nil {
 			return fmt.Errorf("connect to database: %w", err)
 		}
 		defer pgStore.Close()
+
 		if err := pgStore.Migrate(bootCtx); err != nil {
 			return fmt.Errorf("migrate database: %w", err)
 		}
@@ -79,7 +82,6 @@ func run(ctx context.Context) error {
 	}
 
 	rooms := room.NewHub(logger, opts)
-
 	srv := &http.Server{
 		Handler:           api.New(logger, rooms, persistence, cfg.GoogleMapsAPIKey != ""),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -115,15 +117,18 @@ func run(ctx context.Context) error {
 	if closed := rooms.Shutdown(3 * time.Second); closed > 0 {
 		logger.Info("rooms stopped", "count", closed)
 	}
+
 	logger.Info("server stopped gracefully")
 	return nil
 }
 
+// newLogger initializes an slog.Logger according to the configured log level and format.
 func newLogger(cfg config.Config) *slog.Logger {
 	level := new(slog.LevelVar)
 	if err := level.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
 		level.Set(slog.LevelInfo)
 	}
+
 	opts := &slog.HandlerOptions{Level: level}
 	var handler slog.Handler
 	if cfg.LogFormat == "json" {
@@ -131,5 +136,6 @@ func newLogger(cfg config.Config) *slog.Logger {
 	} else {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
+
 	return slog.New(handler)
 }

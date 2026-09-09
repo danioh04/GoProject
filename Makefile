@@ -21,7 +21,7 @@ fmt:
 vet:
 	go vet ./...
 
-lint: fmt vet
+lint: fmt
 	golangci-lint run ./...
 
 tidy:

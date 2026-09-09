@@ -4,24 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"prism/internal/game"
 	"log/slog"
 	"math"
 	mrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"time"
+
+	"scope/internal/game"
 )
 
 const (
-	defaultEndpoint     = "https://maps.googleapis.com/maps/api/streetview/metadata"
-	defaultSearchRadius = 50000
-	defaultJitterKm     = 5.0
+	defaultEndpoint           = "https://maps.googleapis.com/maps/api/streetview/metadata"
+	defaultSearchRadiusMeters = 50_000
+	defaultJitterKm           = 5.0
+	maxDiscoveryPasses        = 3
 )
 
 type Pool struct {
 	apiKey     string
-	endpoint   string
 	radius     int
 	httpClient *http.Client
 	logger     *slog.Logger
@@ -30,29 +31,18 @@ type Pool struct {
 
 type Option func(*Pool)
 
+// WithLogger configures a custom slog.Logger for the location pool.
 func WithLogger(logger *slog.Logger) Option {
 	return func(p *Pool) {
 		p.logger = logger
 	}
 }
 
-func WithEndpoint(endpoint string) Option {
-	return func(p *Pool) {
-		p.endpoint = endpoint
-	}
-}
-
-func WithHTTPClient(client *http.Client) Option {
-	return func(p *Pool) {
-		p.httpClient = client
-	}
-}
-
+// New initializes a location pool configured with offline seeds and optional discovery.
 func New(apiKey string, opts ...Option) *Pool {
 	p := &Pool{
 		apiKey:     apiKey,
-		endpoint:   defaultEndpoint,
-		radius:     defaultSearchRadius,
+		radius:     defaultSearchRadiusMeters,
 		httpClient: &http.Client{Timeout: 4 * time.Second},
 		logger:     slog.Default(),
 		seeds:      CuratedLocations(),
@@ -65,12 +55,11 @@ func New(apiKey string, opts ...Option) *Pool {
 	return p
 }
 
+// Pick selects n locations, attempting Google Street View discovery when an API key is configured.
 func (p *Pool) Pick(n int) []game.Location {
 	if n <= 0 {
 		return nil
 	}
-
-	// In offline simulation mode (no Google Maps API key), pick from curated seeds deterministically
 	if p.apiKey == "" {
 		return p.pickFromSeeds(n)
 	}
@@ -84,8 +73,7 @@ func (p *Pool) Pick(n int) []game.Location {
 	seen := make(map[string]struct{}, n)
 	perm := mrand.Perm(total)
 
-	// Attempt on-demand discovery using Street View Metadata API across unique seed anchors
-	for i := 0; len(out) < n && i < total*3; i++ {
+	for i := 0; len(out) < n && i < total*maxDiscoveryPasses; i++ {
 		seed := p.seeds[perm[i%total]]
 		if i > 0 && i%total == 0 {
 			perm = mrand.Perm(total)
@@ -99,7 +87,7 @@ func (p *Pool) Pick(n int) []game.Location {
 				continue
 			}
 		}
-		// Fallback to seed directly if API lookup fails or panorama was already seen
+
 		if _, exists := seen[seed.ID]; !exists {
 			seen[seed.ID] = struct{}{}
 			out = append(out, seed)
@@ -109,6 +97,17 @@ func (p *Pool) Pick(n int) []game.Location {
 	return out
 }
 
+// Picker returns a function matching the game engine picker signature.
+func (p *Pool) Picker() func(n int) []game.Location {
+	return p.Pick
+}
+
+// MapName returns the human-readable identifier of the location seed set.
+func (p *Pool) MapName() string {
+	return "curated_world"
+}
+
+// pickFromSeeds selects n locations exclusively from offline curated seeds without network calls.
 func (p *Pool) pickFromSeeds(n int) []game.Location {
 	total := len(p.seeds)
 	if total == 0 {
@@ -125,8 +124,6 @@ func (p *Pool) pickFromSeeds(n int) []game.Location {
 	for i := 0; i < count; i++ {
 		out = append(out, p.seeds[perm[i]])
 	}
-
-	// If requested more than available seeds, repeat with random picks
 	for len(out) < n {
 		out = append(out, p.seeds[mrand.IntN(total)])
 	}
@@ -134,28 +131,23 @@ func (p *Pool) pickFromSeeds(n int) []game.Location {
 	return out
 }
 
-func (p *Pool) Picker() func(n int) []game.Location {
-	return func(n int) []game.Location {
-		return p.Pick(n)
-	}
+type metadataResponse struct {
+	Status   string `json:"status"`
+	PanoID   string `json:"pano_id"`
+	Location struct {
+		Lat float64 `json:"lat"`
+		Lng float64 `json:"lng"`
+	} `json:"location"`
 }
 
-func (p *Pool) MapName() string {
-	return "curated_world"
-}
-
-func (p *Pool) Close() {
-	// No background workers to close
-}
-
+// discoverOne queries the Google Street View metadata API for a panorama near coordinates.
 func (p *Pool) discoverOne(coord game.LatLng) (game.Location, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	queryCoord := applyJitter(coord, defaultJitterKm)
-
 	reqURL := fmt.Sprintf("%s?location=%.6f,%.6f&radius=%d&key=%s",
-		p.endpoint, queryCoord.Lat, queryCoord.Lng, p.radius, url.QueryEscape(p.apiKey))
+		defaultEndpoint, queryCoord.Lat, queryCoord.Lng, p.radius, url.QueryEscape(p.apiKey))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
@@ -188,39 +180,28 @@ func (p *Pool) discoverOne(coord game.LatLng) (game.Location, error) {
 	}, nil
 }
 
-// applyJitter offsets a coordinate by up to maxKm in a random direction to discover
-// diverse street panoramas throughout an anchor landmark's broader metropolitan area.
+// applyJitter applies spherical coordinate displacement within a given kilometer radius.
 func applyJitter(coord game.LatLng, maxKm float64) game.LatLng {
 	if maxKm <= 0 {
 		return coord
 	}
 
-	// 1 degree latitude is approximately 111.0 km
 	latDelta := (mrand.Float64()*2 - 1) * (maxKm / 111.0)
-
-	// Scale longitude delta by cosine of latitude to account for meridian convergence
 	rad := coord.Lat * math.Pi / 180.0
 	cosLat := math.Cos(rad)
 	if math.Abs(cosLat) < 0.01 {
-		cosLat = 0.01 // safeguard near poles
+		cosLat = 0.01
 	}
-	lngDelta := (mrand.Float64()*2 - 1) * (maxKm / (111.0 * cosLat))
 
+	lngDelta := (mrand.Float64()*2 - 1) * (maxKm / (111.0 * cosLat))
 	jittered := game.LatLng{
 		Lat: coord.Lat + latDelta,
 		Lng: coord.Lng + lngDelta,
 	}
+
 	if !jittered.Valid() {
 		return coord
 	}
-	return jittered
-}
 
-type metadataResponse struct {
-	Status   string `json:"status"`
-	PanoID   string `json:"pano_id"`
-	Location struct {
-		Lat float64 `json:"lat"`
-		Lng float64 `json:"lng"`
-	} `json:"location"`
+	return jittered
 }

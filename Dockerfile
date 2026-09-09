@@ -1,6 +1,6 @@
 FROM golang:1.26-alpine AS build
 WORKDIR /src
-RUN apk update && apk upgrade --no-cache && apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates
 COPY go.* ./
 RUN go mod download
 COPY . .

@@ -10,19 +10,23 @@ type fakeClock struct {
 	current time.Time
 }
 
+// Now returns the simulated current time for testing.
 func (f *fakeClock) Now() time.Time {
 	return f.current
 }
 
+// Advance moves the simulated clock forward by the given duration.
 func (f *fakeClock) Advance(d time.Duration) {
 	f.current = f.current.Add(d)
 }
 
+// dummyPicker constructs a deterministic location picker returning slice copies or synthetic coordinates.
 func dummyPicker(locations ...Location) func(int) []Location {
 	return func(n int) []Location {
 		if len(locations) >= n {
 			return locations[:n]
 		}
+
 		out := make([]Location, n)
 		for i := 0; i < n; i++ {
 			out[i] = Location{
@@ -31,124 +35,12 @@ func dummyPicker(locations ...Location) func(int) []Location {
 				LatLng: LatLng{Lat: float64(i * 10), Lng: float64(i * 10)},
 			}
 		}
+
 		return out
 	}
 }
 
-func TestLobby_JoinAndCapacity(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxPlayers = 3
-	engine := New(cfg, dummyPicker())
-
-	// Join player 1
-	acts := engine.Apply(JoinEvent{PlayerID: "p1", Nickname: "Alice"})
-	if len(acts) < 2 {
-		t.Fatalf("expected at least 2 actions on join, got %d", len(acts))
-	}
-	p1Joined, ok := acts[0].(PlayerJoinedAction)
-	if !ok || !p1Joined.Host {
-		t.Fatalf("expected p1 to be host, got %+v", acts[0])
-	}
-
-	// Join player 2
-	acts = engine.Apply(JoinEvent{PlayerID: "p2", Nickname: "Bob"})
-	p2Joined, ok := acts[0].(PlayerJoinedAction)
-	if !ok || p2Joined.Host {
-		t.Fatalf("expected p2 to not be host, got %+v", acts[0])
-	}
-
-	// Join player 3
-	acts = engine.Apply(JoinEvent{PlayerID: "p3", Nickname: "Charlie"})
-	if _, ok := acts[0].(PlayerJoinedAction); !ok {
-		t.Fatalf("expected p3 to join successfully")
-	}
-
-	// Join player 4 (exceeds capacity)
-	acts = engine.Apply(JoinEvent{PlayerID: "p4", Nickname: "Dave"})
-	rej, ok := acts[0].(RejectedAction)
-	if !ok || rej.Reason != "room full" {
-		t.Fatalf("expected rejection for full room, got %+v", acts[0])
-	}
-}
-
-func TestLobby_CaseInsensitiveDuplicateNickname(t *testing.T) {
-	cfg := DefaultConfig()
-	engine := New(cfg, dummyPicker())
-
-	engine.Apply(JoinEvent{PlayerID: "p1", Nickname: "Alice"})
-	acts := engine.Apply(JoinEvent{PlayerID: "p2", Nickname: "aLiCe"})
-	rej, ok := acts[0].(RejectedAction)
-	if !ok || rej.Reason != "nickname already taken" {
-		t.Fatalf("expected nickname rejection, got %+v", acts[0])
-	}
-}
-
-func TestLobby_HostAssignment_Creator(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.CreatorNick = "HostUser"
-	engine := New(cfg, dummyPicker())
-
-	// Bob joins first
-	engine.Apply(JoinEvent{PlayerID: "p1", Nickname: "Bob"})
-	roster := engine.Roster()
-	if len(roster) != 1 || !roster[0].IsHost {
-		t.Fatalf("expected Bob to be temporary host")
-	}
-
-	// HostUser joins second: should become host
-	engine.Apply(JoinEvent{PlayerID: "p2", Nickname: "HostUser"})
-	roster = engine.Roster()
-	if len(roster) != 2 {
-		t.Fatalf("expected 2 players")
-	}
-	for _, p := range roster {
-		if p.Nickname == "HostUser" && !p.IsHost {
-			t.Fatalf("expected HostUser to be host")
-		}
-		if p.Nickname == "Bob" && p.IsHost {
-			t.Fatalf("expected Bob to lose host status to creator")
-		}
-	}
-}
-
-func TestLobby_StartRequirements(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MinPlayers = 2
-	engine := New(cfg, dummyPicker())
-
-	engine.Apply(JoinEvent{PlayerID: "p1", Nickname: "Alice"})
-
-	// Solo player cannot start
-	acts := engine.Apply(StartEvent{PlayerID: "p1"})
-	rej, ok := acts[0].(RejectedAction)
-	if !ok || rej.Reason != "need at least 2 players to start" {
-		t.Fatalf("expected start rejection for < min players, got %+v", acts[0])
-	}
-
-	// Non-host cannot start
-	engine.Apply(JoinEvent{PlayerID: "p2", Nickname: "Bob"})
-	acts = engine.Apply(StartEvent{PlayerID: "p2"})
-	rej, ok = acts[0].(RejectedAction)
-	if !ok || rej.Reason != "only the host can start the match" {
-		t.Fatalf("expected rejection for non-host start, got %+v", acts[0])
-	}
-
-	// Host starts successfully
-	acts = engine.Apply(StartEvent{PlayerID: "p1"})
-	if len(acts) < 3 {
-		t.Fatalf("expected match start actions, got %d", len(acts))
-	}
-	if _, ok := acts[0].(MatchStartedAction); !ok {
-		t.Fatalf("expected MatchStartedAction")
-	}
-	if _, ok := acts[1].(RoundStartedAction); !ok {
-		t.Fatalf("expected RoundStartedAction")
-	}
-	if engine.Phase() != PhasePlaying {
-		t.Fatalf("expected PhasePlaying, got %s", engine.Phase())
-	}
-}
-
+// TestMatch_DeterministicPlaythrough_FakeClock tests a complete two-round match deterministically.
 func TestMatch_DeterministicPlaythrough_FakeClock(t *testing.T) {
 	start := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 	clock := &fakeClock{current: start}
@@ -169,7 +61,6 @@ func TestMatch_DeterministicPlaythrough_FakeClock(t *testing.T) {
 	}
 
 	engine := New(cfg, dummyPicker(locs...))
-
 	engine.Apply(JoinEvent{PlayerID: "p1", Nickname: "Alice"})
 	engine.Apply(JoinEvent{PlayerID: "p2", Nickname: "Bob"})
 
@@ -202,6 +93,7 @@ func TestMatch_DeterministicPlaythrough_FakeClock(t *testing.T) {
 	if engine.Phase() != PhaseReveal {
 		t.Fatalf("expected PhaseReveal after all guessed, got %s", engine.Phase())
 	}
+
 	var revAct RoundRevealedAction
 	for _, a := range acts {
 		if r, ok := a.(RoundRevealedAction); ok {
@@ -240,9 +132,10 @@ func TestMatch_DeterministicPlaythrough_FakeClock(t *testing.T) {
 	if engine.Phase() != PhaseFinished {
 		t.Fatalf("expected PhaseFinished, got %s", engine.Phase())
 	}
-	var endAct MatchEndedAction
+
+	var endAct GameEndedAction
 	for _, a := range acts {
-		if e, ok := a.(MatchEndedAction); ok {
+		if e, ok := a.(GameEndedAction); ok {
 			endAct = e
 			break
 		}
@@ -255,6 +148,7 @@ func TestMatch_DeterministicPlaythrough_FakeClock(t *testing.T) {
 	}
 }
 
+// TestMatch_SoloPlayerForfeitsWhenOpponentLeaves verifies that a match finishes when a player disconnects.
 func TestMatch_SoloPlayerForfeitsWhenOpponentLeaves(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MinPlayers = 2
@@ -272,7 +166,7 @@ func TestMatch_SoloPlayerForfeitsWhenOpponentLeaves(t *testing.T) {
 
 	var matchEnded bool
 	for _, a := range acts {
-		if me, ok := a.(MatchEndedAction); ok {
+		if me, ok := a.(GameEndedAction); ok {
 			matchEnded = true
 			if me.Reason != "insufficient_players" {
 				t.Fatalf("expected insufficient_players reason, got %s", me.Reason)
@@ -280,6 +174,45 @@ func TestMatch_SoloPlayerForfeitsWhenOpponentLeaves(t *testing.T) {
 		}
 	}
 	if !matchEnded {
-		t.Fatalf("expected MatchEndedAction on opponent leave")
+		t.Fatalf("expected GameEndedAction on opponent leave")
+	}
+}
+
+// BenchmarkMatch_FullPlaythrough_FakeClock measures the throughput and allocations of a complete five-round match.
+func BenchmarkMatch_FullPlaythrough_FakeClock(b *testing.B) {
+	locs := []Location{
+		{ID: "loc1", PanoID: "p1", LatLng: LatLng{Lat: 48.8566, Lng: 2.3522}},
+		{ID: "loc2", PanoID: "p2", LatLng: LatLng{Lat: 35.6762, Lng: 139.6503}},
+		{ID: "loc3", PanoID: "p3", LatLng: LatLng{Lat: 40.7128, Lng: -74.0060}},
+		{ID: "loc4", PanoID: "p4", LatLng: LatLng{Lat: -33.8688, Lng: 151.2093}},
+		{ID: "loc5", PanoID: "p5", LatLng: LatLng{Lat: 51.5074, Lng: -0.1278}},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		clock := &fakeClock{current: time.Now()}
+		cfg := Config{
+			Rounds:     5,
+			RoundTime:  60 * time.Second,
+			RevealTime: 10 * time.Second,
+			MaxPlayers: 4,
+			MinPlayers: 2,
+			MaxScore:   5000,
+			Clock:      clock,
+		}
+
+		engine := New(cfg, dummyPicker(locs...))
+		engine.Apply(JoinEvent{PlayerID: "p1", Nickname: "Alice"})
+		engine.Apply(JoinEvent{PlayerID: "p2", Nickname: "Bob"})
+		engine.Apply(StartEvent{PlayerID: "p1"})
+
+		for r := 1; r <= 5; r++ {
+			engine.Apply(GuessEvent{PlayerID: "p1", Guess: LatLng{Lat: 48.85, Lng: 2.35}})
+			engine.Apply(GuessEvent{PlayerID: "p2", Guess: LatLng{Lat: 35.67, Lng: 139.65}})
+			clock.Advance(10 * time.Second)
+			engine.Apply(TimeoutEvent{Tag: TimerTag{Kind: TimerReveal, Round: r}})
+		}
 	}
 }

@@ -7,17 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"prism/internal/room"
-	"prism/internal/store"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
+
+	"scope/internal/room"
+	"scope/internal/store"
 )
 
-const maxNicknameLen = 24
+const (
+	maxNicknameLen      = 24
+	maxRequestBodyBytes = 4 * 1024
+)
 
 type Persistence interface {
 	ListRecentGames(ctx context.Context, limit int) ([]store.GameSummary, error)
@@ -27,12 +31,13 @@ type Persistence interface {
 type server struct {
 	logger        *slog.Logger
 	rooms         *room.Hub
-	stats         Persistence
+	store         Persistence
 	hasStreetView bool
 }
 
+// New configures routing and middleware for the HTTP API.
 func New(logger *slog.Logger, rooms *room.Hub, persistence Persistence, hasStreetView bool) http.Handler {
-	s := &server{logger: logger, rooms: rooms, stats: persistence, hasStreetView: hasStreetView}
+	s := &server{logger: logger, rooms: rooms, store: persistence, hasStreetView: hasStreetView}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleRoot)
@@ -43,33 +48,42 @@ func New(logger *slog.Logger, rooms *room.Hub, persistence Persistence, hasStree
 	mux.HandleFunc("GET /v1/games", s.handleListGames)
 	mux.HandleFunc("GET /v1/games/{id}", s.handleGameDetail)
 
-	return requestIDs(logRequests(logger)(recoverPanics(logger)(mux)))
+	handler := recoverPanics(logger)(mux)
+	handler = logRequests(logger)(handler)
+	return requestIDs(handler)
 }
 
+// handleRoot serves the service metadata, feature availability, and API directory.
 func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"service": "prism",
+		"service": "scope",
 		"status":  "ok",
 		"version": "1.0",
 		"features": map[string]bool{
 			"streetview":  s.hasStreetView,
-			"persistence": s.stats != nil,
+			"persistence": s.store != nil,
 		},
 		"endpoints": map[string]string{
 			"health":      "GET /healthz",
 			"create_room": "POST /v1/rooms",
 			"get_room":    "GET /v1/rooms/{code}",
-			"websocket":   "GET /v1/ws?code={code}&name={name}",
+			"websocket":   "GET /v1/ws?code={code}&nickname={nickname}",
 			"list_games":  "GET /v1/games",
 			"game_detail": "GET /v1/games/{id}",
 		},
 	})
 }
 
+// handleHealth provides a lightweight healthcheck endpoint.
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+type createRoomRequest struct {
+	Nickname string `json:"nickname"`
+}
+
+// handleCreateRoom creates a new game room with the specified host player.
 func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	var req createRoomRequest
 	if err := decodeStrict(w, r, &req); err != nil {
@@ -87,13 +101,14 @@ func (s *server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, createdRoom.Snapshot())
 }
 
+// handleWS handles incoming WebSocket connections, attaching players to their target rooms.
 func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 
-	nickname, ok := normalizeNickname(r.URL.Query().Get("name"))
+	nickname, ok := normalizeNickname(r.URL.Query().Get("nickname"))
 	if !ok {
-		s.logger.Info("ws handshake rejected", "reason", "invalid name", "remote", r.RemoteAddr)
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("name must be 1-%d characters", maxNicknameLen))
+		s.logger.Info("ws handshake rejected", "reason", "invalid nickname", "remote", r.RemoteAddr)
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("nickname must be 1-%d characters", maxNicknameLen))
 		return
 	}
 	if !room.ValidJoinCode(code) {
@@ -101,6 +116,7 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid join code")
 		return
 	}
+
 	targetRoom, exists := s.rooms.Get(code)
 	if !exists {
 		s.logger.Info("ws handshake rejected", "reason", "room not found", "code", code)
@@ -124,6 +140,7 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	playerID := outcome.PlayerID
 	s.logger.Info("websocket attached", "join_code", code, "player_id", playerID, "nickname", nickname)
+
 	session.Run(func(env room.Envelope) {
 		targetRoom.NotifyInbound(playerID, env)
 	}, func() {
@@ -132,6 +149,7 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetRoom returns the current state and member count of a room.
 func (s *server) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
 	if !room.ValidJoinCode(code) {
@@ -144,35 +162,42 @@ func (s *server) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "room not found")
 		return
 	}
+
 	writeJSON(w, http.StatusOK, targetRoom.Snapshot())
 }
 
+// handleListGames returns recently completed games when persistence is enabled.
 func (s *server) handleListGames(w http.ResponseWriter, r *http.Request) {
-	if s.stats == nil {
+	if s.store == nil {
 		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
 		return
 	}
+
 	limit := 20
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 && parsed <= 50 {
 			limit = parsed
 		}
 	}
-	games, err := s.stats.ListRecentGames(r.Context(), limit)
+
+	games, err := s.store.ListRecentGames(r.Context(), limit)
 	if err != nil {
 		s.logger.Error("list games query failed", "error", err)
 		writeErr(w, http.StatusInternalServerError, "games lookup failed")
 		return
 	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"games": games})
 }
 
+// handleGameDetail returns comprehensive match history and round results for a game ID.
 func (s *server) handleGameDetail(w http.ResponseWriter, r *http.Request) {
-	if s.stats == nil {
+	if s.store == nil {
 		writeErr(w, http.StatusServiceUnavailable, "persistence disabled")
 		return
 	}
-	detail, err := s.stats.GameDetail(r.Context(), r.PathValue("id"))
+
+	detail, err := s.store.GameDetail(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
 		writeErr(w, http.StatusNotFound, "game not found")
 		return
@@ -182,43 +207,48 @@ func (s *server) handleGameDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "game lookup failed")
 		return
 	}
+
 	writeJSON(w, http.StatusOK, detail)
 }
 
-type createRoomRequest struct {
-	Nickname string `json:"nickname"`
-}
-
+// normalizeNickname trims whitespace and validates player nickname constraints.
 func normalizeNickname(raw string) (string, bool) {
 	n := strings.TrimSpace(raw)
 	if n == "" || len([]rune(n)) > maxNicknameLen {
 		return "", false
 	}
+
 	return n, true
 }
 
+// decodeStrict parses a JSON request body and rejects unknown fields or payloads exceeding max size.
 func decodeStrict(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
+
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid request body: %w", err)
 	}
+
 	return nil
 }
 
+// writeJSON writes a JSON-encoded response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeErr writes a standardized JSON error message.
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 type requestIDKey struct{}
 
+// requestIDs is a middleware that assigns a unique request ID to each incoming HTTP request.
 func requestIDs(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := randHex(8)
@@ -228,19 +258,23 @@ func requestIDs(next http.Handler) http.Handler {
 	})
 }
 
+// requestIDFrom extracts the request ID from the context.
 func requestIDFrom(ctx context.Context) string {
 	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
 		return id
 	}
+
 	return ""
 }
 
+// logRequests is a middleware that logs method, path, status, and duration for each request.
 func logRequests(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(sw, r)
+
 			logger.Info("request",
 				"method", r.Method,
 				"path", r.URL.Path,
@@ -257,15 +291,18 @@ type statusWriter struct {
 	status int
 }
 
+// WriteHeader captures the HTTP status code before writing to the response writer.
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap returns the underlying ResponseWriter for standard library compatibility.
 func (w *statusWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+// recoverPanics is a middleware that recovers from unexpected panics and writes a 500 error.
 func recoverPanics(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -279,11 +316,13 @@ func recoverPanics(logger *slog.Logger) func(http.Handler) http.Handler {
 					http.Error(w, "internal server error", http.StatusInternalServerError)
 				}
 			}()
+
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
+// randHex generates a cryptographically secure random hexadecimal string.
 func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)

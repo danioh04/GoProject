@@ -1,4 +1,4 @@
-name: prism
+name: scope
 
 services:
   server:
@@ -7,7 +7,7 @@ services:
       ADDR: ":8080"
       LOG_LEVEL: info
       LOG_FORMAT: json
-      DATABASE_URL: postgres://prism:prism@db:5432/prism?sslmode=disable
+      DATABASE_URL: postgres://scope:scope@db:5432/scope?sslmode=disable
       GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY:-}"
     ports:
       - "8080:8080"
@@ -19,15 +19,15 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: prism
-      POSTGRES_PASSWORD: prism
-      POSTGRES_DB: prism
+      POSTGRES_USER: scope
+      POSTGRES_PASSWORD: scope
+      POSTGRES_DB: scope
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U prism"]
+      test: ["CMD-SHELL", "pg_isready -U scope"]
       interval: 2s
       timeout: 3s
       retries: 15

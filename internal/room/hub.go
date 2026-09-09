@@ -23,6 +23,7 @@ type Hub struct {
 	rooms map[string]*Room
 }
 
+// NewHub initializes a room hub with logger and configuration defaults.
 func NewHub(logger *slog.Logger, defaults Options) *Hub {
 	if defaults.MaxPlayers <= 0 {
 		defaults.MaxPlayers = 8
@@ -30,6 +31,7 @@ func NewHub(logger *slog.Logger, defaults Options) *Hub {
 	if logger == nil {
 		logger = slog.Default()
 	}
+
 	return &Hub{
 		logger:   logger,
 		defaults: defaults,
@@ -37,6 +39,7 @@ func NewHub(logger *slog.Logger, defaults Options) *Hub {
 	}
 }
 
+// Create instantiates, registers, and starts a new game room.
 func (h *Hub) Create(hostNickname string) *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -52,15 +55,14 @@ func (h *Hub) Create(hostNickname string) *Room {
 	opts := h.defaults
 	opts.ID = generateID()
 	opts.JoinCode = code
-	opts.Label = hostNickname
-	opts.Config.CreatorNick = hostNickname
+	opts.CreatorNickname = hostNickname
+	opts.Config.CreatorNickname = hostNickname
 	opts.Logger = h.logger
 
 	r := Start(opts)
 	h.rooms[code] = r
 	h.logger.Info("room created", "room_id", r.Snapshot().ID, "join_code", code)
 
-	// Inactivity watchdog: if no player joins within TTL, automatically close the abandoned room
 	inactivityTimer := time.AfterFunc(lobbyInactivityTTL, func() {
 		if r.Snapshot().PlayerCount == 0 && r.Snapshot().State == PhaseLobby {
 			h.logger.Info("room expired due to inactivity", "join_code", code)
@@ -80,13 +82,16 @@ func (h *Hub) Create(hostNickname string) *Room {
 	return r
 }
 
+// Get retrieves an active room by its case-insensitive join code.
 func (h *Hub) Get(code string) (*Room, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
 	r, ok := h.rooms[strings.ToUpper(strings.TrimSpace(code))]
 	return r, ok
 }
 
+// Shutdown gracefully terminates all active rooms, waiting up to the timeout.
 func (h *Hub) Shutdown(wait time.Duration) int {
 	h.mu.RLock()
 	rooms := make([]*Room, 0, len(h.rooms))
@@ -107,6 +112,7 @@ func (h *Hub) Shutdown(wait time.Duration) int {
 			h.logger.Warn("room shutdown timed out")
 			return closed
 		}
+
 		timer := time.NewTimer(remaining)
 		select {
 		case <-r.Done():
@@ -117,30 +123,37 @@ func (h *Hub) Shutdown(wait time.Duration) int {
 			return closed
 		}
 	}
+
 	return closed
 }
 
+// ValidJoinCode verifies that a code conforms to standard length and alphabet rules.
 func ValidJoinCode(code string) bool {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if len(code) != codeLen {
 		return false
 	}
+
 	for _, c := range code {
 		if !strings.ContainsRune(codeAlphabet, c) {
 			return false
 		}
 	}
+
 	return true
 }
 
+// generateCode creates a random alphanumeric join code.
 func generateCode() string {
 	var out [codeLen]byte
 	for i := range out {
 		out[i] = codeAlphabet[mrand.IntN(len(codeAlphabet))]
 	}
+
 	return string(out[:])
 }
 
+// generateID creates a random hex identifier for a room.
 func generateID() string {
 	return randHex(idBytes)
 }
